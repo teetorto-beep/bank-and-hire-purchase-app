@@ -6,18 +6,28 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": { "resizeMode": "contain", "backgroundColor": "#0a0f1e" },
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0f1e"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.majupat.customer",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
-      "adaptiveIcon": { "backgroundColor": "#0a0f1e" },
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0f1e"
+      },
       "package": "com.majupat.customer",
-      "permissions": ["RECEIVE_BOOT_COMPLETED", "VIBRATE"]
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
     "plugins": [
       [
@@ -28,6 +38,11 @@
           "sounds": []
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "46a1657e-cc51-4736-bbbd-1682703b03e4"
+      }
+    }
   }
 }

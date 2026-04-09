@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
+import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { Download, FileText, Calendar } from 'lucide-react';
+import { Download, FileText, Calendar, Users } from 'lucide-react';
 import { exportReportPDF, exportLoanReportPDF, exportCSV } from '../../core/export';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
@@ -33,6 +34,7 @@ function getPeriodRange(period) {
 
 export default function Reports() {
   const { customers, accounts, transactions, loans, collectors, collections, hpAgreements, hpPayments, auditLog, products } = useApp();
+  const navigate = useNavigate();
   const [tab, setTab] = useState('overview');
   const [period, setPeriod] = useState('month');
   const [customFrom, setCustomFrom] = useState('');
@@ -126,6 +128,12 @@ export default function Reports() {
         <div className="page-header-left">
           <div className="page-title">Reports</div>
           <div className="page-desc">Analytics, statements and data exports</div>
+        </div>
+        <div className="page-header-right">
+          <button className="btn btn-primary" onClick={() => navigate('/reports/teller')}>
+            <Users size={16} />
+            Teller Call-Over
+          </button>
         </div>
       </div>
 
