@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Majupat Customer",
+    "slug": "majupat-customer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": { "resizeMode": "contain", "backgroundColor": "#0a0f1e" },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.majupat.customer",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": { "backgroundColor": "#0a0f1e" },
+      "package": "com.majupat.customer",
+      "permissions": ["RECEIVE_BOOT_COMPLETED", "VIBRATE"]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563eb",
+          "sounds": []
+        }
+      ]
+    ]
+  }
+}
