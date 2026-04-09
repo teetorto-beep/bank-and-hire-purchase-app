@@ -11,17 +11,23 @@ export default function TellerReport() {
   const [selectedTeller, setSelectedTeller] = useState('all');
   const [showReversed, setShowReversed] = useState(false);
 
-  // Get unique tellers from transactions
+  // Get all tellers from users (not just those who posted transactions)
   const tellers = useMemo(() => {
-    const tellerSet = new Set();
-    transactions.forEach(t => {
-      if (t.posterId) tellerSet.add(t.posterId);
-    });
-    return Array.from(tellerSet).map(id => {
-      const user = users?.find(u => u.id === id);
-      return { id, name: user?.name || user?.email || 'Unknown' };
-    });
-  }, [transactions, users]);
+    if (!users || users.length === 0) return [];
+    
+    // Get all users with teller role or who have posted transactions
+    const tellerUsers = users.filter(u => 
+      u.role === 'teller' || 
+      u.role === 'admin' || 
+      u.role === 'manager' ||
+      transactions.some(t => t.posterId === u.id)
+    );
+    
+    return tellerUsers.map(u => ({
+      id: u.id,
+      name: u.name || u.email || 'Unknown'
+    }));
+  }, [users, transactions]);
 
   // Filter transactions by date and teller
   const filteredTransactions = useMemo(() => {
