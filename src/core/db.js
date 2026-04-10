@@ -76,7 +76,11 @@ function toCamel(obj) {
 
 // ─── Strip undefined values ───────────────────────────────────────────────────
 function clean(obj) {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+  return Object.fromEntries(
+    Object.entries(obj)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, v === '' ? null : v])
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -281,7 +285,7 @@ export const transactionsDB = {
     return q;
   },
 
-  async post(payload, userId, userName) {
+  async post(payload, userId, userName, userPhone) {
     // Handle both camelCase and snake_case input
     const accountId = payload.account_id || payload.accountId;
     const type = payload.type;
@@ -321,6 +325,7 @@ export const transactionsDB = {
       balance_after: balanceAfter,
       created_by: userId || null,
       poster_name: userName || null,
+      poster_phone: userPhone || null,
       channel,
       status: 'completed',
       hp_agreement_id: payload.hp_agreement_id || payload.hpAgreementId || undefined,

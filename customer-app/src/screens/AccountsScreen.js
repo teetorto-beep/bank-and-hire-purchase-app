@@ -33,7 +33,6 @@ export default function AccountsScreen({ customer, tick }) {
       .from("accounts")
       .select("id,account_number,type,balance,status,interest_rate,opened_at")
       .eq("customer_id", customer.id)
-      .neq("type", "hire_purchase")   // HP is a loan product, not a deposit account
       .order("opened_at", { ascending: true });
     setAccounts(data || []);
     if (refresh) setRefreshing(false); else { setLoading(false); firstLoad.current = false; }

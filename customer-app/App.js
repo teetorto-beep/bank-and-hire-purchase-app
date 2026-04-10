@@ -43,6 +43,7 @@ const TABS = [
   { key: "loans",    label: "Loans",    emoji: "📋" },
   { key: "txns",     label: "History",  emoji: "🕐" },
   { key: "notifs",   label: "Alerts",   emoji: "🔔" },
+  { key: "profile",  label: "Profile",  emoji: "👤" },
 ];
 
 function getGreeting() {
@@ -205,6 +206,7 @@ function MainApp({ customer, onLogout }) {
         {tab === "loans"    && <LoanScreen     customer={customer} tick={tick} />}
         {tab === "txns"     && <TransactionsScreen customer={customer} tick={tick} />}
         {tab === "notifs"   && <NotificationsScreen customer={customer} onRead={() => setUnread(0)} tick={tick} />}
+        {tab === "profile"  && <ProfileScreen  customer={customer} onLogout={onLogout} />}
       </View>
 
       {/* ── Tab bar ── */}

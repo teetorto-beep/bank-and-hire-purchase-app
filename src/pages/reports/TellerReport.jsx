@@ -87,7 +87,7 @@ export default function TellerReport() {
     exportReportPDF({
       title: 'Teller Call-Over Report',
       subtitle: `Date: ${new Date(selectedDate).toLocaleDateString()} · ${filteredTransactions.length} transactions · ${tellerSummary.length} teller(s)`,
-      columns: ['Time', 'Reference', 'Account', 'Customer', 'Narration', 'Type', 'Amount', 'Teller'],
+      columns: ['Time', 'Reference', 'Account', 'Customer', 'Narration', 'Type', 'Amount', 'Teller', 'Phone'],
       rows: filteredTransactions.map(t => {
         const acc = accounts.find(a => a.id === t.accountId);
         const cust = customers.find(c => c.id === acc?.customerId);
@@ -100,6 +100,7 @@ export default function TellerReport() {
           t.type.toUpperCase(),
           `GHC ${Number(t.amount || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`,
           t.posterName || '—',
+          t.posterPhone || '—',
         ];
       }),
       summary: [
@@ -126,6 +127,7 @@ export default function TellerReport() {
           Amount: t.amount,
           BalanceAfter: t.balanceAfter,
           Teller: t.posterName,
+          TellerPhone: t.posterPhone,
           Channel: t.channel,
           Reversed: t.reversed ? 'Yes' : 'No',
         };
@@ -307,13 +309,14 @@ export default function TellerReport() {
                 <th>Amount</th>
                 <th>Balance After</th>
                 <th>Teller</th>
+                <th>Phone</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="table-empty">
+                  <td colSpan={11} className="table-empty">
                     <AlertCircle size={16} />
                     No transactions found for selected date and teller
                   </td>
@@ -341,6 +344,9 @@ export default function TellerReport() {
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{GHS(t.balanceAfter)}</td>
                       <td style={{ fontSize: 12 }}>{t.posterName || '—'}</td>
+                      <td style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-3)' }}>
+                        {t.posterPhone || '—'}
+                      </td>
                       <td>
                         {t.reversed ? (
                           <span className="badge badge-gray">

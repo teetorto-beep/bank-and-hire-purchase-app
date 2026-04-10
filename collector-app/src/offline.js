@@ -131,7 +131,6 @@ async function replayOperation(op) {
       });
 
       // 7. Update collector total
-      await supabase.from("collectors").update({ total_collected: supabase.rpc ? undefined : undefined }).eq("id", collectorId);
       const { data: col } = await supabase.from("collectors").select("total_collected").eq("id", collectorId).single();
       if (col) await supabase.from("collectors").update({ total_collected: Number(col.total_collected || 0) + Number(amount), updated_at: new Date().toISOString() }).eq("id", collectorId);
 

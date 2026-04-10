@@ -287,18 +287,15 @@ export default function CreditScreen({ collector }) {
             await supabase.from('gl_entries').insert(glEntries);
             
             // Update GL account balances
-            await supabase.from('gl_accounts')
-              .update({ balance: supabase.raw(`balance + ${amt}`) })
-              .eq('id', cashAccount.id);
-            
-            if (paymentType === 'savings') {
-              await supabase.from('gl_accounts')
-                .update({ balance: supabase.raw(`balance + ${amt}`) })
-                .eq('id', creditAccount.id);
-            } else {
-              await supabase.from('gl_accounts')
-                .update({ balance: supabase.raw(`balance - ${amt}`) })
-                .eq('id', creditAccount.id);
+            const { data: cashGL } = await supabase.from('gl_accounts').select('balance').eq('id', cashAccount.id).single();
+            if (cashGL) await supabase.from('gl_accounts').update({ balance: Number(cashGL.balance) + amt }).eq('id', cashAccount.id);
+
+            const { data: creditGL } = await supabase.from('gl_accounts').select('balance').eq('id', creditAccount.id).single();
+            if (creditGL) {
+              const newCreditBal = paymentType === 'savings'
+                ? Number(creditGL.balance) + amt
+                : Number(creditGL.balance) - amt;
+              await supabase.from('gl_accounts').update({ balance: newCreditBal }).eq('id', creditAccount.id);
             }
           }
         }

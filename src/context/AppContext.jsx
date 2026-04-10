@@ -258,7 +258,7 @@ export function AppProvider({ children }) {
   };
 
   const postTransaction = async (data) => {
-    const { data: t, error } = await transactionsDB.post(data, user?.id, user?.name);
+    const { data: t, error } = await transactionsDB.post(data, user?.id, user?.name, user?.phone);
     if (t) {
       setTransactions(p => [normTransaction(t), ...p]);
       const { data: updatedAcc } = await accountsDB.getById(data.account_id || data.accountId);
