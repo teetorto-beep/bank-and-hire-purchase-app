@@ -33,16 +33,48 @@ export default function CreditScreen({ collector }) {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(null);
 
-  // Search customers
+  // Search customers by name, phone OR account number
   const searchCustomers = useCallback(async (q) => {
     if (!q || q.length < 2) { setCustomers([]); return; }
     setLoadingCust(true);
-    const { data } = await supabase
-      .from('customers')
-      .select('id, name, phone')
-      .or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
-      .limit(20);
-    setCustomers(data || []);
+    try {
+      // First try searching by account number
+      const { data: accData } = await supabase
+        .from('accounts')
+        .select('customer_id, account_number')
+        .ilike('account_number', `%${q}%`)
+        .eq('status', 'active')
+        .limit(10);
+
+      const customerIdsFromAccounts = (accData || []).map(a => a.customer_id).filter(Boolean);
+
+      // Search customers by name/phone + any found via account number
+      let query = supabase
+        .from('customers')
+        .select('id, name, phone')
+        .or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
+        .limit(20);
+
+      const { data: byNamePhone } = await query;
+      const namePhoneIds = new Set((byNamePhone || []).map(c => c.id));
+
+      // Merge results — customers found by account number
+      let extra = [];
+      if (customerIdsFromAccounts.length > 0) {
+        const newIds = customerIdsFromAccounts.filter(id => !namePhoneIds.has(id));
+        if (newIds.length > 0) {
+          const { data: byAcc } = await supabase
+            .from('customers')
+            .select('id, name, phone')
+            .in('id', newIds);
+          extra = byAcc || [];
+        }
+      }
+
+      setCustomers([...(byNamePhone || []), ...extra]);
+    } catch (e) {
+      console.warn('Search error:', e.message);
+    }
     setLoadingCust(false);
   }, []);
 
@@ -397,7 +429,7 @@ export default function CreditScreen({ collector }) {
         <Text style={styles.stepLabel}>STEP 1 · CUSTOMER</Text>
         <TextInput
           style={styles.input}
-          placeholder="Search by name or phone…"
+          placeholder="Search by name, phone or account number…"
           placeholderTextColor="#94a3b8"
           value={custSearch}
           onChangeText={setCustSearch}
