@@ -39,16 +39,20 @@ export default function ReportScreen({ collector }) {
 
   const load = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true); else setLoading(true);
-    const [from, to] = getRange(period);
-    let q = supabase
-      .from('collections')
-      .select('*, accounts(account_number, balance)')
-      .eq('collector_id', collector.id)
-      .order('created_at', { ascending: false });
-    if (from) q = q.gte('created_at', from);
-    if (to)   q = q.lte('created_at', to);
-    const { data } = await q;
-    setCollections(data || []);
+    try {
+      const [from, to] = getRange(period);
+      let q = supabase
+        .from('collections')
+        .select('*, accounts(account_number, balance)')
+        .eq('collector_id', collector.id)
+        .order('created_at', { ascending: false });
+      if (from) q = q.gte('created_at', from);
+      if (to)   q = q.lte('created_at', to);
+      const { data } = await q;
+      setCollections(data || []);
+    } catch (e) {
+      console.warn('ReportScreen load error:', e.message);
+    }
     if (showRefresh) setRefreshing(false); else setLoading(false);
   }, [period, collector.id]);
 

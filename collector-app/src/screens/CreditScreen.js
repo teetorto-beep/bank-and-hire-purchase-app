@@ -127,12 +127,13 @@ export default function CreditScreen({ collector }) {
       }
 
       // ── ONLINE: post directly ─────────────────────────────────────────
-      const { data: acc } = await supabase
+      const { data: acc, error: accErr } = await supabase
         .from('accounts')
         .select('balance, customer_id')
         .eq('id', selectedAccount.id)
         .single();
 
+      if (accErr || !acc) throw new Error(accErr?.message || 'Account not found');
       const newBalance = Number(acc.balance) + amt;
       const narration = paymentType === 'savings'
         ? `Savings Deposit — ${collector.name}`

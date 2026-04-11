@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "f095bf55-c29c-4059-925b-4956f38f19d2"
+      }
+    },
+    "android": {
+      "package": "com.torto478.hirepurchasesystem"
+    }
+  }
+}

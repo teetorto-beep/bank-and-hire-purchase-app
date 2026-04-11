@@ -15,10 +15,15 @@ let _isOnline = true;
 export function getIsOnline() { return _isOnline; }
 
 export function subscribeToNetwork(onChange) {
-  return NetInfo.addEventListener(state => {
-    _isOnline = !!(state.isConnected && state.isInternetReachable);
-    onChange(_isOnline);
-  });
+  try {
+    return NetInfo.addEventListener(state => {
+      _isOnline = !!(state.isConnected && state.isInternetReachable);
+      onChange(_isOnline);
+    });
+  } catch (e) {
+    console.warn('NetInfo subscribe failed:', e.message);
+    return () => {};
+  }
 }
 
 // ── Queue helpers ─────────────────────────────────────────────────────────────

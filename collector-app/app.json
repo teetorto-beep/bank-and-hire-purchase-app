@@ -6,14 +6,14 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#581c87"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.majupat.collector"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,14 +21,28 @@
         "backgroundColor": "#581c87"
       },
       "package": "com.majupat.collector",
-      "versionCode": 2,
-      "edgeToEdgeEnabled": false,
+      "versionCode": 3,
       "minSdkVersion": 24,
-      "targetSdkVersion": 35
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      "expo-font",
+      "expo-system-ui",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#581c87"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "5440c770-5975-415e-969f-8aacaf85e1db"

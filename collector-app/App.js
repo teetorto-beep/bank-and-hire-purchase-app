@@ -18,6 +18,39 @@ import ReportScreen from './src/screens/ReportScreen';
 import AccountScreen from './src/screens/AccountScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 
+// ── Error Boundary ────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('App error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#581c87', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '900', marginBottom: 12 }}>Something went wrong</Text>
+          <Text style={{ color: '#c084fc', fontSize: 13, textAlign: 'center', marginBottom: 24 }}>
+            {this.state.error?.message || 'An unexpected error occurred'}
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#a855f7', borderRadius: 10, padding: 14, paddingHorizontal: 28 }}
+            onPress={() => this.setState({ hasError: false, error: null })}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const TABS = [
   { key: 'credit',  label: 'Record',   icon: '💳' },
   { key: 'account', label: 'Accounts', icon: '🏦' },
@@ -37,37 +70,46 @@ function MainApp({ collector, onLogout }) {
   const [syncing, setSyncing] = useState(false);
 
   const loadTodayTotal = async () => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const { data } = await supabase
-      .from('collections').select('amount')
-      .eq('collector_id', collector.id)
-      .gte('created_at', today.toISOString());
-    setTodayTotal((data || []).reduce((s, c) => s + Number(c.amount || 0), 0));
+    try {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const { data } = await supabase
+        .from('collections').select('amount')
+        .eq('collector_id', collector.id)
+        .gte('created_at', today.toISOString());
+      setTodayTotal((data || []).reduce((s, c) => s + Number(c.amount || 0), 0));
+    } catch (e) {
+      console.warn('loadTodayTotal error:', e.message);
+    }
   };
 
   useEffect(() => { loadTodayTotal(); }, []);
 
   // Network monitoring + auto-sync
   useEffect(() => {
-    const unsub = subscribeToNetwork(async (online) => {
-      setIsOnline(online);
-      if (online) {
-        const q = await getQueue();
-        if (q.length > 0) {
-          setSyncing(true);
-          addToast('🔄 Back Online', `Syncing ${q.length} offline record(s)…`, 'info');
-          const { synced, failed } = await syncQueue();
-          setSyncing(false);
-          setQueueCount(0);
-          loadTodayTotal();
-          if (synced > 0) addToast('✅ Sync Complete', `${synced} record(s) synced successfully`, 'success');
-          if (failed > 0) addToast('⚠️ Sync Issues', `${failed} record(s) failed to sync`, 'warning');
+    let unsub;
+    try {
+      unsub = subscribeToNetwork(async (online) => {
+        setIsOnline(online);
+        if (online) {
+          const q = await getQueue();
+          if (q.length > 0) {
+            setSyncing(true);
+            addToast('🔄 Back Online', `Syncing ${q.length} offline record(s)…`, 'info');
+            const { synced, failed } = await syncQueue();
+            setSyncing(false);
+            setQueueCount(0);
+            loadTodayTotal();
+            if (synced > 0) addToast('✅ Sync Complete', `${synced} record(s) synced successfully`, 'success');
+            if (failed > 0) addToast('⚠️ Sync Issues', `${failed} record(s) failed to sync`, 'warning');
+          }
         }
-      }
-    });
+      });
+    } catch (e) {
+      console.warn('Network subscription error:', e.message);
+    }
     // Check queue count on mount
-    getQueue().then(q => setQueueCount(q.length));
-    return () => unsub();
+    getQueue().then(q => setQueueCount(q.length)).catch(() => {});
+    return () => { try { unsub?.(); } catch (_) {} };
   }, []);
 
   const addToast = (title, message, type = 'info') => {
@@ -77,37 +119,44 @@ function MainApp({ collector, onLogout }) {
   };
 
   useEffect(() => {
-    // 1. Subscribe to notifications table
-    const unsubNotifs = subscribeToNotifications(collector.id, (n) => {
-      setUnread(p => p + 1);
-      addToast(n.title || 'Notification', n.message || '', n.type || 'info');
-    });
+    let unsubNotifs = () => {};
+    let unsubApprovals = () => {};
+    let unsubCols = () => {};
+    try {
+      // 1. Subscribe to notifications table
+      unsubNotifs = subscribeToNotifications(collector.id, (n) => {
+        setUnread(p => p + 1);
+        addToast(n.title || 'Notification', n.message || '', n.type || 'info');
+      });
 
-    // 2. Subscribe to approval status changes
-    const unsubApprovals = subscribeToApprovals(collector.id, (row) => {
-      setUnread(p => p + 1);
-      if (row.status === 'approved') {
-        addToast('✅ Request Approved', `Your ${row.type || 'request'} has been approved!`, 'success');
-      } else if (row.status === 'rejected') {
-        const reason = row.reject_reason ? ` Reason: ${row.reject_reason}` : '';
-        addToast('❌ Request Rejected', `Your ${row.type || 'request'} was rejected.${reason}`, 'error');
-      }
-    });
+      // 2. Subscribe to approval status changes
+      unsubApprovals = subscribeToApprovals(collector.id, (row) => {
+        setUnread(p => p + 1);
+        if (row.status === 'approved') {
+          addToast('✅ Request Approved', `Your ${row.type || 'request'} has been approved!`, 'success');
+        } else if (row.status === 'rejected') {
+          const reason = row.reject_reason ? ` Reason: ${row.reject_reason}` : '';
+          addToast('❌ Request Rejected', `Your ${row.type || 'request'} was rejected.${reason}`, 'error');
+        }
+      });
 
-    // 3. Subscribe to new collections
-    const unsubCols = subscribeToCollections(collector.id, (col) => {
-      addToast(
-        '✅ Collection Recorded',
-        `${GHS(col.amount)} from ${col.customer_name || 'customer'}`,
-        'success'
-      );
-      loadTodayTotal();
-    });
+      // 3. Subscribe to new collections
+      unsubCols = subscribeToCollections(collector.id, (col) => {
+        addToast(
+          '✅ Collection Recorded',
+          `${GHS(col.amount)} from ${col.customer_name || 'customer'}`,
+          'success'
+        );
+        loadTodayTotal();
+      });
+    } catch (e) {
+      console.warn('Realtime subscription error:', e.message);
+    }
 
     return () => {
-      unsubNotifs();
-      unsubApprovals();
-      unsubCols();
+      try { unsubNotifs(); } catch (_) {}
+      try { unsubApprovals(); } catch (_) {}
+      try { unsubCols(); } catch (_) {}
     };
   }, [collector.id]);
 
@@ -248,10 +297,10 @@ export default function App() {
   }
 
   if (!collector) {
-    return <SafeAreaProvider><LoginScreen onLogin={setCollector} /></SafeAreaProvider>;
+    return <SafeAreaProvider><ErrorBoundary><LoginScreen onLogin={setCollector} /></ErrorBoundary></SafeAreaProvider>;
   }
 
-  return <SafeAreaProvider><MainApp collector={collector} onLogout={handleLogout} /></SafeAreaProvider>;
+  return <SafeAreaProvider><ErrorBoundary><MainApp collector={collector} onLogout={handleLogout} /></ErrorBoundary></SafeAreaProvider>;
 }
 
 const styles = StyleSheet.create({
