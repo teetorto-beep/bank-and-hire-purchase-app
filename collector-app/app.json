@@ -53,10 +53,7 @@
           }
         }
       ],
-      [
-        "./plugins/withGradleVersion",
-        { "gradleVersion": "8.6" }
-      ]
+      ["./plugins/withGradleVersion", { "gradleVersion": "8.7" }]
     ],
     "extra": {
       "eas": {
