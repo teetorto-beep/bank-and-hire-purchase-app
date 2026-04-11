@@ -46,16 +46,20 @@
         "expo-build-properties",
         {
           "android": {
-            "compileSdkVersion": 34,
+            "compileSdkVersion": 35,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0",
-            "kotlinVersion": "1.9.24"
+            "buildToolsVersion": "35.0.0",
+            "kotlinVersion": "1.9.24",
+            "gradleVersion": "8.6",
+            "agpVersion": "8.5.2"
           }
         }
       ]
     ],
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "66658ae1-0408-4fb6-8b5e-35481de57dd9"
+      }
     },
     "owner": "maxbryan"
   }
