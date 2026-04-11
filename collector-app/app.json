@@ -55,9 +55,7 @@
       ]
     ],
     "extra": {
-      "eas": {
-        "projectId": "5440c770-5975-415e-969f-8aacaf85e1db"
-      }
+      "eas": {}
     },
     "owner": "maxbryan"
   }
