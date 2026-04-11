@@ -45,7 +45,7 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
     try {
       // Try cache first if offline
       const cacheKey = `home_${customer.id}`;
-      if (!refresh) {
+      if (!refresh && firstLoad.current) {
         const cached = await getCached(cacheKey);
         if (cached) {
           setAccounts(cached.accounts || []);
