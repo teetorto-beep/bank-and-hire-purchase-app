@@ -429,9 +429,13 @@ export const transactionsDB = {
     }
 
     // Auto-post to GL (non-fatal)
-    try {
-      await postTransactionToGL(txn, account.type, userName);
-    } catch (_) {}
+    // Skip 'collection' channel — the collector app posts its own GL entries (COL journal)
+    // to avoid double-counting cash at hand
+    if (channel !== 'collection') {
+      try {
+        await postTransactionToGL(txn, account.type, userName);
+      } catch (_) {}
+    }
 
     // ── Push notification to customer (non-fatal) ─────────────────────────
     // Skip auto-deductions and reversals to avoid noise; only notify on
