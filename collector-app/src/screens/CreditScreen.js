@@ -238,10 +238,10 @@ export default function CreditScreen({ collector }) {
         const { data: glAccounts } = await supabase
           .from('gl_accounts')
           .select('id, code, name')
-          .in('code', ['1000', '2010', '1100']);
+          .in('code', ['1020', '2010', '1100']);
         
         if (glAccounts && glAccounts.length > 0) {
-          const cashAccount = glAccounts.find(a => a.code === '1000');
+          const cashAccount = glAccounts.find(a => a.code === '1020');
           let creditAccount;
           
           if (paymentType === 'savings') {
