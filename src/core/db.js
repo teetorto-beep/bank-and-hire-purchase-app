@@ -767,15 +767,26 @@ export const loansDB = {
   },
 
   async add(payload, userId) {
+    const principal = Number(payload.amount);
+    const rate = Number(payload.interestRate ?? payload.interest_rate ?? 0);
+    const tenure = Number(payload.tenure ?? 0);
+    const monthly = Number(payload.monthlyPayment ?? payload.monthly_payment ?? 0);
+
+    // Total repayable = principal + total interest (monthly * tenure)
+    // This ensures outstanding tracks the full amount owed including interest
+    const totalRepayable = monthly > 0 && tenure > 0
+      ? Math.round(monthly * tenure * 100) / 100
+      : principal;
+
     const row = clean({
       customer_id: payload.customerId || payload.customer_id,
       account_id: payload.accountId || payload.account_id,
       type: payload.type,
-      amount: payload.amount,
-      outstanding: payload.amount,
-      interest_rate: payload.interestRate ?? payload.interest_rate,
+      amount: principal,
+      outstanding: totalRepayable,  // full repayable amount (principal + interest)
+      interest_rate: rate,
       tenure: payload.tenure,
-      monthly_payment: payload.monthlyPayment ?? payload.monthly_payment,
+      monthly_payment: monthly,
       purpose: payload.purpose,
       hp_agreement_id: payload.hpAgreementId || payload.hp_agreement_id || undefined,
       item_name: payload.itemName || payload.item_name || undefined,
