@@ -71,7 +71,7 @@ const ptBadge = (type) => {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CollectionReport() {
-  const { collections, collectors, accounts, loans, refresh, transactions } = useApp();
+  const { collections, collectors, accounts, loans, refresh } = useApp();
 
   const [period, setPeriod] = useState('this_month');
   const [customFrom, setCustomFrom] = useState('');
@@ -91,82 +91,40 @@ export default function CollectionReport() {
 
   // ── Normalised + filtered collections ──────────────────────────────────────
   const filtered = useMemo(() => {
-    // Build collections from transactions where channel = 'collection'
-    const collectionsFromTxns = transactions
-      .filter(t => t.channel === 'collection' || (t.narration && t.narration.includes('—')))
-      .map(t => {
-        // Extract collector name from narration (e.g., "Savings Deposit — DOMINIC")
-        const match = t.narration?.match(/—\s*(.+?)(?:\s*\(|$)/);
-        const collectorName = match ? match[1].trim() : 'Unknown';
-        
-        // Find collector by name
-        const collector = collectors.find(c => c.name === collectorName);
-        
-        return {
-          id: t.id,
-          collectorId: collector?.id || '',
-          collectorName: collectorName,
-          customerId: t.customerId || '',
-          customerName: t.customerName || accounts.find(a => a.id === t.accountId)?.customerName || '—',
-          accountId: t.accountId,
-          createdAt: t.createdAt,
-          amount: Number(t.amount || 0),
-          paymentType: t.narration?.includes('Loan') ? 'loan' : t.narration?.includes('HP') ? 'hp' : 'savings',
-          status: t.status || 'completed',
-          notes: t.narration || '',
-        };
-      });
-
-    // Merge with actual collections table data
-    const allCollections = [
-      ...collectionsFromTxns,
-      ...collections.map(c => ({
-        ...c,
-        collectorId: c.collector_id || c.collectorId || '',
+    return collections
+      .map(c => ({
+        id:            c.id,
+        collectorId:   c.collector_id   || c.collectorId   || '',
         collectorName: c.collector_name || c.collectorName || '—',
-        customerId: c.customer_id || c.customerId || '',
-        customerName: c.customer_name || c.customerName || '—',
-        accountId: c.account_id || c.accountId || '',
-        createdAt: c.created_at || c.createdAt || '',
-        amount: Number(c.amount || 0),
-        paymentType: c.payment_type || c.paymentType || 'savings',
+        customerId:    c.customer_id    || c.customerId    || '',
+        customerName:  c.customer_name  || c.customerName  || '—',
+        accountId:     c.account_id     || c.accountId     || '',
+        createdAt:     c.created_at     || c.createdAt     || '',
+        amount:        Number(c.amount  || 0),
+        paymentType:   c.payment_type   || c.paymentType   || 'savings',
+        status:        c.status         || 'completed',
+        notes:         c.notes          || '',
+        loanId:        c.loan_id        || c.loanId        || null,
+        hpAgreementId: c.hp_agreement_id || c.hpAgreementId || null,
       }))
-    ];
-
-    // Remove duplicates (prefer collections table over transactions)
-    const uniqueCollections = allCollections.reduce((acc, curr) => {
-      const existing = acc.find(c => 
-        c.accountId === curr.accountId && 
-        c.amount === curr.amount && 
-        Math.abs(new Date(c.createdAt) - new Date(curr.createdAt)) < 5000 // within 5 seconds
-      );
-      if (!existing) {
-        acc.push(curr);
-      } else if (curr.id && curr.id.length > 10 && !existing.id) {
-        // Replace transaction-based with actual collection if it exists
-        const idx = acc.indexOf(existing);
-        acc[idx] = curr;
-      }
-      return acc;
-    }, []);
-
-    return uniqueCollections
       .filter(c => {
         if (collectorFilter !== 'all' && c.collectorId !== collectorFilter) return false;
         if (paymentTypeFilter !== 'all' && c.paymentType !== paymentTypeFilter) return false;
         if (from && c.createdAt && c.createdAt.slice(0, 10) < from) return false;
-        if (to && c.createdAt && c.createdAt.slice(0, 10) > to) return false;
+        if (to   && c.createdAt && c.createdAt.slice(0, 10) > to)   return false;
         return true;
       })
       .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
-  }, [collections, transactions, accounts, collectors, collectorFilter, paymentTypeFilter, from, to]);
+  }, [collections, collectorFilter, paymentTypeFilter, from, to]);
 
   const grandTotal = useMemo(() => filtered.reduce((s, c) => s + c.amount, 0), [filtered]);
+  const savingsTotal = useMemo(() => filtered.filter(c => c.paymentType === 'savings').reduce((s, c) => s + c.amount, 0), [filtered]);
+  const loanTotal    = useMemo(() => filtered.filter(c => c.paymentType === 'loan').reduce((s, c) => s + c.amount, 0), [filtered]);
+  const hpTotal      = useMemo(() => filtered.filter(c => c.paymentType === 'hp').reduce((s, c) => s + c.amount, 0), [filtered]);
 
   const byCollector = useMemo(() =>
     collectors.map(col => {
       const cols = filtered.filter(c => c.collectorId === col.id);
-      // Build unique customer list with totals
       const custMap = {};
       cols.forEach(c => {
         const key = c.customerId || c.customerName;
@@ -177,16 +135,21 @@ export default function CollectionReport() {
             accountId: c.accountId,
             collections: [],
             total: 0,
+            savings: 0, loan: 0, hp: 0,
           };
         }
         custMap[key].collections.push(c);
         custMap[key].total += c.amount;
+        custMap[key][c.paymentType] = (custMap[key][c.paymentType] || 0) + c.amount;
       });
       return {
         ...col,
-        count: cols.length,
-        total: cols.reduce((s, c) => s + c.amount, 0),
-        recent: cols.slice(0, 3),
+        count:    cols.length,
+        total:    cols.reduce((s, c) => s + c.amount, 0),
+        savings:  cols.filter(c => c.paymentType === 'savings').reduce((s, c) => s + c.amount, 0),
+        loan:     cols.filter(c => c.paymentType === 'loan').reduce((s, c) => s + c.amount, 0),
+        hp:       cols.filter(c => c.paymentType === 'hp').reduce((s, c) => s + c.amount, 0),
+        recent:   cols.slice(0, 3),
         customers: Object.values(custMap).sort((a, b) => b.total - a.total),
         allCollections: cols,
       };
@@ -465,43 +428,26 @@ export default function CollectionReport() {
       </div>
 
       {/* ── Stat Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--green-light, #dcfce7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <DollarSign size={16} style={{ color: 'var(--green)' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+        {[
+          { label: 'Total Collected', value: GHS(grandTotal), color: 'var(--green)', bg: '#dcfce7', icon: <DollarSign size={16} style={{ color: 'var(--green)' }} /> },
+          { label: 'Savings', value: GHS(savingsTotal), color: '#16a34a', bg: '#f0fdf4', icon: <span style={{ fontSize: 14 }}>💰</span> },
+          { label: 'Loan Repayments', value: GHS(loanTotal), color: '#1d4ed8', bg: '#dbeafe', icon: <span style={{ fontSize: 14 }}>📋</span> },
+          { label: 'HP Repayments', value: GHS(hpTotal), color: '#7c3aed', bg: '#ede9fe', icon: <span style={{ fontSize: 14 }}>🛍️</span> },
+          { label: 'Collections', value: filtered.length, color: 'var(--brand)', bg: 'var(--brand-light)', icon: <TrendingUp size={16} style={{ color: 'var(--brand)' }} /> },
+          { label: 'Active Collectors', value: activeCollectors, color: 'var(--purple)', bg: '#f3e8ff', icon: <Users size={16} style={{ color: 'var(--purple)' }} /> },
+          { label: 'Avg per Collection', value: GHS(avgPerCollection), color: 'var(--yellow)', bg: '#fef9c3', icon: <TrendingUp size={16} style={{ color: 'var(--yellow)' }} /> },
+        ].map(({ label, value, color, bg, icon }) => (
+          <div key={label} className="card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {icon}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', lineHeight: 1.2 }}>{label}</span>
             </div>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Total Collected</span>
+            <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--green)' }}>{GHS(grandTotal)}</div>
-        </div>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--brand-light, #dbeafe)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <TrendingUp size={16} style={{ color: 'var(--brand)' }} />
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Collections</span>
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{filtered.length}</div>
-        </div>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: '#f3e8ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Users size={16} style={{ color: 'var(--purple)' }} />
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Active Collectors</span>
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--purple)' }}>{activeCollectors}</div>
-        </div>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: '#fef9c3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <TrendingUp size={16} style={{ color: 'var(--yellow)' }} />
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Avg per Collection</span>
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--yellow)' }}>{GHS(avgPerCollection)}</div>
-        </div>
+        ))}
       </div>
 
       {/* ── Tabs ── */}
@@ -548,6 +494,11 @@ export default function CollectionReport() {
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Total Collected</div>
                     <div style={{ fontSize: 20, fontWeight: 900, color: 'var(--green)' }}>{GHS(col.total)}</div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      {col.savings > 0 && <span className="badge badge-green" style={{ fontSize: 10 }}>💰 {GHS(col.savings)}</span>}
+                      {col.loan    > 0 && <span className="badge badge-blue"  style={{ fontSize: 10 }}>📋 {GHS(col.loan)}</span>}
+                      {col.hp      > 0 && <span className="badge badge-purple" style={{ fontSize: 10 }}>🛍️ {GHS(col.hp)}</span>}
+                    </div>
                   </div>
                   <button
                     className="btn btn-primary btn-sm"
