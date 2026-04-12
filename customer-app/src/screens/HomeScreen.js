@@ -209,8 +209,12 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
             const overdue = loan.status === "overdue";
             const paid    = loanPaid[loan.id] || 0;
             const orig    = Number(loan.amount || 0);
+            const monthly = Number(loan.monthly_payment || 0);
+            const tenure  = Number(loan.tenure || 0);
+            const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : orig;
             const out     = Number(loan.outstanding || 0);
-            const pct     = orig > 0 ? Math.min(100, ((orig - out) / orig) * 100) : 0;
+            // progress based on total repayable, not just principal
+            const pct     = totalRepay > 0 ? Math.min(100, ((totalRepay - out) / totalRepay) * 100) : 0;
             return (
               <View key={loan.id} style={[S.loanCard, overdue && S.loanCardOverdue]}>
                 <View style={S.loanCardTop}>
@@ -237,7 +241,7 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
                   {[
                     ["Principal", GHS(orig)],
                     ["Outstanding", GHS(out)],
-                    ["Total Paid", GHS(paid)],
+                    ["Total Paid", GHS(Math.max(0, totalRepay - out))],
                     ["Installment", GHS(loan.monthly_payment)],
                   ].map(([l, v]) => (
                     <View key={l} style={S.loanStat}>
