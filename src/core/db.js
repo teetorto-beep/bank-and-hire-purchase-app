@@ -826,14 +826,29 @@ export const loansDB = {
       if (monthly <= 0 || tenure <= 0) continue;
 
       const totalRepayable = Math.round(monthly * tenure * 100) / 100;
+      const totalInterest = Math.max(0, totalRepayable - principal);
 
-      // Only fix if outstanding equals principal (old format) and totalRepayable > principal
-      // This means interest hasn't been added yet
-      if (Math.abs(outstanding - principal) < 0.01 && totalRepayable > principal) {
-        await supabase.from('loans')
-          .update({ outstanding: totalRepayable, updated_at: new Date().toISOString() })
-          .eq('id', loan.id);
-        fixed++;
+      if (totalInterest <= 0) continue; // no interest, nothing to fix
+
+      // If outstanding <= principal, it means interest was never added.
+      // Calculate how much principal has been paid, then add remaining interest.
+      // new outstanding = (principal - amountPaidSoPrincipal) + remainingInterest
+      if (outstanding <= principal) {
+        const principalPaid = principal - outstanding;
+        // Interest paid proportionally to principal paid
+        const interestPaid = totalInterest > 0
+          ? Math.round((principalPaid / principal) * totalInterest * 100) / 100
+          : 0;
+        const newOutstanding = Math.max(0,
+          Math.round((totalRepayable - principalPaid - interestPaid) * 100) / 100
+        );
+
+        if (Math.abs(newOutstanding - outstanding) > 0.01) {
+          await supabase.from('loans')
+            .update({ outstanding: newOutstanding, updated_at: new Date().toISOString() })
+            .eq('id', loan.id);
+          fixed++;
+        }
       }
     }
     return { fixed, error: null };

@@ -71,12 +71,12 @@ export function AppProvider({ children }) {
 
   // ── Run loan outstanding migration once on startup ────────────────────
   useEffect(() => {
-    const migrationKey = 'loan_outstanding_migrated_v1';
+    const migrationKey = 'loan_outstanding_migrated_v2';
     if (!sessionStorage.getItem(migrationKey)) {
       loansDB.fixExistingLoanOutstanding().then(({ fixed }) => {
         if (fixed > 0) {
           console.log(`[Migration] Fixed outstanding for ${fixed} existing loan(s)`);
-          silentRefresh(); // refresh to show updated values
+          silentRefresh();
         }
         sessionStorage.setItem(migrationKey, '1');
       }).catch(() => {});
