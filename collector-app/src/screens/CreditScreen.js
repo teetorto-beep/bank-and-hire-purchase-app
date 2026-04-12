@@ -149,7 +149,7 @@ export default function CreditScreen({ collector }) {
           account:     selectedAccount.account_number,
           amount:      amt,
           paymentType,
-          newBalance:  Number(selectedAccount.balance) + amt,
+          newBalance:  paymentType === 'savings' ? Number(selectedAccount.balance) + amt : null,
           ref:         'QUEUED-' + Date.now(),
           date:        new Date().toLocaleString(),
           offline:     true,
@@ -166,7 +166,12 @@ export default function CreditScreen({ collector }) {
         .single();
 
       if (accErr || !acc) throw new Error(accErr?.message || 'Account not found');
-      const newBalance = Number(acc.balance) + amt;
+
+      // For savings: credit increases account balance
+      // For loan/HP: payment does NOT touch account balance — only reduces loan outstanding
+      const isSavings = paymentType === 'savings';
+      const newBalance = isSavings ? Number(acc.balance) + amt : Number(acc.balance);
+
       const narration = paymentType === 'savings'
         ? `Savings Deposit — ${collector.name}`
         : paymentType === 'loan'
@@ -175,10 +180,10 @@ export default function CreditScreen({ collector }) {
 
       const ref = `TXN${Date.now()}${Math.random().toString(36).slice(2,5).toUpperCase()}`;
 
-      // 2. Insert transaction
+      // 2. Insert transaction record
       await supabase.from('transactions').insert({
         account_id:    selectedAccount.id,
-        type:          'credit',
+        type:          isSavings ? 'credit' : 'debit',  // loan/HP is a debit (money going to pay loan)
         amount:        amt,
         narration:     notes || narration,
         reference:     ref,
@@ -186,14 +191,16 @@ export default function CreditScreen({ collector }) {
         channel:       'collection',
         status:        'completed',
         poster_name:   collector.name,
-        created_by:    null,   // collector.id is not a users.id — avoid FK violation
+        created_by:    null,
       });
 
-      // 3. Update account balance
-      await supabase.from('accounts').update({
-        balance: newBalance,
-        updated_at: new Date().toISOString(),
-      }).eq('id', selectedAccount.id);
+      // 3. Update account balance ONLY for savings deposits
+      if (isSavings) {
+        await supabase.from('accounts').update({
+          balance: newBalance,
+          updated_at: new Date().toISOString(),
+        }).eq('id', selectedAccount.id);
+      }
 
       // 4. Reduce loan outstanding if loan repayment
       if (paymentType === 'loan' && selectedLoan) {
@@ -358,15 +365,15 @@ export default function CreditScreen({ collector }) {
         });
       }
 
-      setDone({
-        customer:    selectedCustomer.name,
-        account:     selectedAccount.account_number,
-        amount:      amt,
-        paymentType,
-        newBalance,
-        ref,
-        date:        new Date().toLocaleString(),
-      });
+        setDone({
+          customer:    selectedCustomer.name,
+          account:     selectedAccount.account_number,
+          amount:      amt,
+          paymentType,
+          newBalance:  isSavings ? newBalance : null,
+          ref,
+          date:        new Date().toLocaleString(),
+        });
     } catch (e) {
       Alert.alert('Error', e.message || 'Failed to record collection');
     }
@@ -403,7 +410,9 @@ export default function CreditScreen({ collector }) {
             ['Customer', done.customer],
             ['Account', done.account],
             ['Amount', GHS(done.amount)],
-            ['New Balance', GHS(done.newBalance)],
+            done.newBalance !== null
+              ? ['New Balance', GHS(done.newBalance)]
+              : ['Payment Applied To', done.paymentType === 'loan' ? 'Loan Outstanding' : 'HP Agreement'],
             ['Reference', done.ref],
             ['Date', done.date],
           ].map(([k, v]) => (

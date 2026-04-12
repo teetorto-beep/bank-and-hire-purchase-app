@@ -81,21 +81,28 @@ async function replayOperation(op) {
       // 1. Fetch current balance
       const { data: acc } = await supabase.from("accounts").select("balance, customer_id").eq("id", accountId).single();
       if (!acc) throw new Error("Account not found");
-      const newBalance = Number(acc.balance) + Number(amount);
+
+      // Only savings deposits increase account balance — loan/HP payments do NOT
+      const isSavings = paymentType === "savings";
+      const newBalance = isSavings ? Number(acc.balance) + Number(amount) : Number(acc.balance);
       const ref = `TXN${Date.now()}${Math.random().toString(36).slice(2,5).toUpperCase()}`;
 
       // 2. Post transaction
       await supabase.from("transactions").insert({
-        account_id: accountId, type: "credit", amount: Number(amount),
+        account_id: accountId,
+        type: isSavings ? "credit" : "debit",
+        amount: Number(amount),
         narration: notes || `${paymentType} collection via ${collectorName}`,
         reference: ref, balance_after: newBalance,
         channel: "collection", status: "completed",
         poster_name: collectorName,
-        created_by: null,  // collector.id is not a users.id
+        created_by: null,
       });
 
-      // 3. Update account balance
-      await supabase.from("accounts").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("id", accountId);
+      // 3. Update account balance ONLY for savings
+      if (isSavings) {
+        await supabase.from("accounts").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("id", accountId);
+      }
 
       // 4. Loan outstanding
       if (paymentType === "loan" && loanId) {
