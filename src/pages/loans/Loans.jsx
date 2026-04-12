@@ -75,10 +75,13 @@ export default function Loans() {
       const principal = Number(loan.amount || 0);
       const monthly = Number(loan.monthlyPayment || 0);
       const tenure = Number(loan.tenure || 0);
-      const totalRepay = monthly * tenure;
-      const totalInterest = totalRepay - principal;
-      const paid = principal - Number(loan.outstanding || 0);
-      const paidPct = principal > 0 ? Math.min(100, (paid / principal) * 100) : 0;
+      const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : principal;
+      const totalInterest = Math.max(0, totalRepay - principal);
+      // outstanding now tracks total remaining (principal + interest)
+      // paid = totalRepay - outstanding
+      const outstanding = Number(loan.outstanding || 0);
+      const paid = Math.max(0, totalRepay - outstanding);
+      const paidPct = totalRepay > 0 ? Math.min(100, (paid / totalRepay) * 100) : 0;
       const daily = monthly / 30;
       const weekly = monthly / 4.33;
 

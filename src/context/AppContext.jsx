@@ -69,6 +69,20 @@ export function AppProvider({ children }) {
   // initial load
   useEffect(() => { refresh(); }, [refresh]);
 
+  // ── Run loan outstanding migration once on startup ────────────────────
+  useEffect(() => {
+    const migrationKey = 'loan_outstanding_migrated_v1';
+    if (!sessionStorage.getItem(migrationKey)) {
+      loansDB.fixExistingLoanOutstanding().then(({ fixed }) => {
+        if (fixed > 0) {
+          console.log(`[Migration] Fixed outstanding for ${fixed} existing loan(s)`);
+          silentRefresh(); // refresh to show updated values
+        }
+        sessionStorage.setItem(migrationKey, '1');
+      }).catch(() => {});
+    }
+  }, []);
+
   // ── Auto-refresh every 2 seconds (more aggressive polling) ────────────
   useEffect(() => {
     const id = setInterval(silentRefresh, 2000); // Changed from 5000 to 2000

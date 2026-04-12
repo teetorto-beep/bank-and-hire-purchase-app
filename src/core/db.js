@@ -805,6 +805,39 @@ export const loansDB = {
     }
     return { data, error };
   },
+
+  // ── Fix existing loans: set outstanding = total repayable (principal + interest) ──
+  // Run this once to migrate existing loans that only have outstanding = principal
+  async fixExistingLoanOutstanding() {
+    const { data: loans, error } = await supabase
+      .from('loans')
+      .select('id, amount, outstanding, monthly_payment, tenure, interest_rate')
+      .in('status', ['active', 'overdue', 'pending']);
+
+    if (error || !loans) return { fixed: 0, error };
+
+    let fixed = 0;
+    for (const loan of loans) {
+      const principal = Number(loan.amount || 0);
+      const monthly = Number(loan.monthly_payment || 0);
+      const tenure = Number(loan.tenure || 0);
+      const outstanding = Number(loan.outstanding || 0);
+
+      if (monthly <= 0 || tenure <= 0) continue;
+
+      const totalRepayable = Math.round(monthly * tenure * 100) / 100;
+
+      // Only fix if outstanding equals principal (old format) and totalRepayable > principal
+      // This means interest hasn't been added yet
+      if (Math.abs(outstanding - principal) < 0.01 && totalRepayable > principal) {
+        await supabase.from('loans')
+          .update({ outstanding: totalRepayable, updated_at: new Date().toISOString() })
+          .eq('id', loan.id);
+        fixed++;
+      }
+    }
+    return { fixed, error: null };
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
