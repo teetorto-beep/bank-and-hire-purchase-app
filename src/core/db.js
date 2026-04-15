@@ -1046,13 +1046,13 @@ export const hpAgreementsDB = {
 
     if (agrErr) return { data: null, error: agrErr };
 
-    // 2. Create linked loan (principal only — interest tracked via monthly payment)
+    // 2. Create linked loan — outstanding = total repayable (principal + interest)
     const loanRow = clean({
       customer_id: agrRow.customer_id,
       account_id: payload.accountId || payload.account_id,
       type: 'hire_purchase',
       amount: loanPrincipal,
-      outstanding: loanPrincipal,
+      outstanding: totalRepayment,  // full repayable (principal + interest), not just principal
       interest_rate: rate,
       tenure,
       monthly_payment: monthlyPayment,
@@ -1085,18 +1085,19 @@ export const hpAgreementsDB = {
       }
     }
 
-    // 4. Post down payment transaction if provided
-    if (downPayment > 0 && (payload.accountId || payload.account_id)) {
-      await transactionsDB.post({
-        account_id: payload.accountId || payload.account_id,
-        type: 'debit',
+    // 4. Post down payment as a collection record only — does NOT debit account
+    // Down payment is cash paid directly, not from the savings account
+    if (downPayment > 0) {
+      await supabase.from('collections').insert({
+        customer_id: agrRow.customer_id,
+        account_id: payload.accountId || payload.account_id || null,
         amount: downPayment,
-        narration: `HP Down Payment: ${agrRow.item_name}`,
-        channel: 'teller',
+        notes: `HP Down Payment: ${agrRow.item_name}`,
+        payment_type: 'hp',
         hp_agreement_id: agr.id,
         loan_id: loan.id,
-        _skip_auto_deduct: true,
-      }, userId, userName);
+        status: 'completed',
+      });
     }
 
     await audit('CREATE_HP_AGREEMENT', 'hp_agreements', agr.id, userId, userName,
