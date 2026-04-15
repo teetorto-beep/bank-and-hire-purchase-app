@@ -10,7 +10,7 @@ const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFrac
 const field = (obj, snake, camel) => obj?.[snake] ?? obj?.[camel];
 
 export default function Accounts() {
-  const { accounts, updateAccount } = useApp();
+  const { accounts, loans, updateAccount } = useApp();
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -109,8 +109,21 @@ export default function Accounts() {
                     <td>
                       <Badge status={a.type} label={a.type?.replace(/_/g, ' ')} />
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: a.balance < 0 ? 'var(--red)' : 'var(--text)' }}>
-                      {GHS(a.balance)}
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                      <div style={{ color: a.balance < 0 ? 'var(--red)' : 'var(--text)' }}>{GHS(a.balance)}</div>
+                      {(() => {
+                        const acctLoans = loans.filter(l =>
+                          (l.accountId === a.id || l.account_id === a.id) &&
+                          (l.status === 'active' || l.status === 'overdue')
+                        );
+                        const loanOut = acctLoans.reduce((s, l) => s + Number(l.outstanding || 0), 0);
+                        if (loanOut <= 0) return null;
+                        return (
+                          <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>
+                            −{GHS(loanOut)} loan
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td>{a._interestRate ?? 0}%</td>
                     <td><Badge status={a.status} /></td>

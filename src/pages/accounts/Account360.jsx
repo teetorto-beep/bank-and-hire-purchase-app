@@ -109,7 +109,15 @@ export default function Account360() {
               Accounts ({result.allCustAccounts.length})
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
-              {result.allCustAccounts.map(a => (
+              {result.allCustAccounts.map(a => {
+                // Net position = savings balance minus any loan outstanding on this account
+                const linkedLoans = result.custLoans.filter(l =>
+                  (l.accountId === a.id) && (l.status === 'active' || l.status === 'overdue')
+                );
+                const loanOutstanding = linkedLoans.reduce((s, l) => s + Number(l.outstanding || 0), 0);
+                const netPosition = Number(a.balance) - loanOutstanding;
+                const hasLoan = loanOutstanding > 0;
+                return (
                 <div key={a.id} style={{ padding: 16, border: `2px solid ${a.id === result.acc.id ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 10, background: a.id === result.acc.id ? 'var(--brand-light)' : 'var(--surface)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                     <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-3)' }}>{a.type?.replace('_', ' ')}</span>
@@ -117,9 +125,23 @@ export default function Account360() {
                   </div>
                   <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14 }}>{a.accountNumber}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, marginTop: 8, color: a.balance < 0 ? 'var(--red)' : 'var(--text)' }}>{GHS(a.balance)}</div>
+                  {hasLoan && (
+                    <>
+                      <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 4, fontWeight: 700 }}>
+                        − {GHS(loanOutstanding)} loan outstanding
+                      </div>
+                      <div style={{ borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Net Position</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: netPosition < 0 ? 'var(--red)' : 'var(--green)' }}>
+                          {netPosition < 0 ? '-' : ''}{GHS(Math.abs(netPosition))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                   <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>{a.interestRate}% p.a.</div>
                 </div>
-              ))}
+                );
+              })}
               <div style={{ padding: 16, border: '2px dashed var(--border)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-3)' }}
                 onClick={() => navigate('/accounts/open')}>
                 <Plus size={16} style={{ marginRight: 6 }} />Open New Account
