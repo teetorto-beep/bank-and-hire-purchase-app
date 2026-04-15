@@ -307,14 +307,22 @@ export const transactionsDB = {
     if (accErr || !account) return { data: null, error: accErr || new Error('Account not found') };
     if (account.status !== 'active') return { data: null, error: new Error(`Account is ${account.status}`) };
 
-    // Balance check for debits
-    if (type === 'debit' && account.balance < amount) {
+    const loanId = payload.loan_id || payload.loanId;
+    const hpId   = payload.hp_agreement_id || payload.hpAgreementId;
+    // Loan/HP repayments do NOT touch account balance — they only reduce loan outstanding
+    const isLoanRepayment = !!(loanId || hpId) && type === 'debit';
+
+    // Balance check for debits (skip for loan/HP repayments — cash paid directly to collector)
+    if (type === 'debit' && !isLoanRepayment && account.balance < amount) {
       return { data: null, error: new Error('Insufficient balance') };
     }
 
-    const balanceAfter = type === 'credit'
-      ? Number(account.balance) + amount
-      : Number(account.balance) - amount;
+    // Account balance only changes for non-loan transactions
+    const balanceAfter = isLoanRepayment
+      ? Number(account.balance)
+      : type === 'credit'
+        ? Number(account.balance) + amount
+        : Number(account.balance) - amount;
 
     const txnRow = clean({
       account_id: accountId,
@@ -341,13 +349,14 @@ export const transactionsDB = {
 
     if (txnErr) return { data: null, error: txnErr };
 
-    // Update account balance
-    const { error: balErr } = await supabase
-      .from('accounts')
-      .update({ balance: balanceAfter, updated_at: new Date().toISOString() })
-      .eq('id', accountId);
-
-    if (balErr) return { data: txn, error: balErr };
+    // Update account balance (skip for loan/HP repayments)
+    if (!isLoanRepayment) {
+      const { error: balErr } = await supabase
+        .from('accounts')
+        .update({ balance: balanceAfter, updated_at: new Date().toISOString() })
+        .eq('id', accountId);
+      if (balErr) return { data: txn, error: balErr };
+    }
 
     await audit(
       type === 'credit' ? 'CREDIT' : 'DEBIT',
@@ -364,8 +373,6 @@ export const transactionsDB = {
     }
 
     // ── Update linked loan outstanding ────────────────────────────────────
-    const loanId = payload.loan_id || payload.loanId;
-    const hpId = payload.hp_agreement_id || payload.hpAgreementId;
 
     if (loanId && type === 'debit') {
       const { data: loan, error: loanFetchErr } = await supabase.from('loans').select('outstanding, hp_agreement_id, monthly_payment, tenure').eq('id', loanId).single();
