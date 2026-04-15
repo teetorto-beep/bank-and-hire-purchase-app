@@ -29,6 +29,7 @@ import HPItems from './pages/hirepurchase/HPItems';
 import HPAgreements from './pages/hirepurchase/HPAgreements';
 import UserManagement from './pages/users/UserManagement';
 import Reports from './pages/reports/Reports';
+import TellerSession from './pages/teller/TellerSession';
 import TellerReport from './pages/reports/TellerReport';
 import Settings from './pages/settings/Settings';
 import GeneralLedger from './pages/gl/GeneralLedger';
@@ -78,6 +79,7 @@ function AppContent({ user, onLogout }) {
               <Route path="/products" element={<BankProducts />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/teller" element={<TellerReport />} />
+              <Route path="/teller/session" element={<TellerSession />} />
               <Route path="/gl" element={<GeneralLedger />} />
               <Route path="/users" element={<UserManagement />} />
               <Route path="/approvals" element={<PendingApprovals />} />

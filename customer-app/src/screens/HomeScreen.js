@@ -115,6 +115,13 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
   const todayIn      = todayTxns.filter(t => t.type === "credit").reduce((s, t) => s + Number(t.amount), 0);
   const todayOut     = todayTxns.filter(t => t.type === "debit").reduce((s, t) => s + Number(t.amount), 0);
 
+  // Derived stats
+  const overdueLoans  = loans.filter(l => l.status === "overdue");
+  const nextDue       = loans
+    .filter(l => l.next_due_date)
+    .sort((a, b) => new Date(a.next_due_date) - new Date(b.next_due_date))[0];
+  const greeting      = (() => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; })();
+
   if (loading) return (
     <View style={S.center}>
       <ActivityIndicator color="#2563eb" size="large" />
@@ -127,8 +134,16 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor="#2563eb" />}
       showsVerticalScrollIndicator={false}>
 
+      {/* ── Offline banner ── */}
+      {!isOnline && (
+        <View style={S.offlineBanner}>
+          <Text style={S.offlineTxt}>📡 Offline — showing cached data</Text>
+        </View>
+      )}
+
       {/* ── Hero ── */}
       <View style={S.hero}>
+        <Text style={S.heroGreeting}>{greeting}, {customer.name?.split(" ")[0] || "there"} 👋</Text>
         <Text style={S.heroLabel}>Total Balance</Text>
         <Text style={S.heroAmt}>{GHS(totalBal)}</Text>
         <Text style={S.heroSub}>{accounts.length} account{accounts.length !== 1 ? "s" : ""}</Text>
@@ -139,6 +154,45 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
           </View>
         )}
       </View>
+
+      {/* ── Quick stats bar ── */}
+      <View style={S.statsBar}>
+        {[
+          { label: "Accounts",    value: accounts.length,    color: "#2563eb" },
+          { label: "Active Loans",value: loans.length,       color: loans.length > 0 ? "#d97706" : "#64748b" },
+          { label: "Overdue",     value: overdueLoans.length,color: overdueLoans.length > 0 ? "#dc2626" : "#64748b" },
+          { label: "Today In",    value: GHS(todayIn),       color: "#16a34a", small: true },
+        ].map(s => (
+          <View key={s.label} style={S.statItem}>
+            <Text style={[S.statVal, { color: s.color }, s.small && { fontSize: 13 }]}>{s.value}</Text>
+            <Text style={S.statLabel}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* ── Overdue alert ── */}
+      {overdueLoans.length > 0 && (
+        <View style={S.alertCard}>
+          <Text style={S.alertIcon}>⚠️</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={S.alertTitle}>Overdue Payment{overdueLoans.length > 1 ? "s" : ""}</Text>
+            <Text style={S.alertBody}>
+              {overdueLoans.length} loan{overdueLoans.length > 1 ? "s are" : " is"} overdue. Contact your branch to avoid penalties.
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* ── Next payment due ── */}
+      {!overdueLoans.length && nextDue && (
+        <View style={S.nextDueCard}>
+          <Text style={{ fontSize: 20 }}>📅</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={S.nextDueTitle}>Next Payment Due</Text>
+            <Text style={S.nextDueBody}>{fmtDate(nextDue.next_due_date)} · {GHS(nextDue.monthly_payment)}</Text>
+          </View>
+        </View>
+      )}
 
       {/* ── Account cards ── */}
       {accounts.length > 0 ? (
@@ -313,6 +367,7 @@ const S = StyleSheet.create({
   loadTxt: { color: "#64748b", fontSize: 13 },
 
   hero: { backgroundColor: "#0a0f1e", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30 },
+  heroGreeting: { color: "#64748b", fontSize: 13, fontWeight: "600", marginBottom: 8 },
   heroLabel: { color: "#64748b", fontSize: 12, fontWeight: "600", marginBottom: 4 },
   heroAmt: { color: "#fff", fontSize: 36, fontWeight: "900", letterSpacing: -1, marginBottom: 2 },
   heroSub: { color: "#334155", fontSize: 12, marginBottom: 10 },
@@ -320,6 +375,23 @@ const S = StyleSheet.create({
   pillGreen: { backgroundColor: "rgba(22,163,74,0.25)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   pillRed:   { backgroundColor: "rgba(220,38,38,0.25)",  paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   pillTxt: { color: "#fff", fontSize: 11, fontWeight: "700" },
+
+  offlineBanner: { backgroundColor: "#fef9c3", paddingVertical: 8, paddingHorizontal: 16, alignItems: "center" },
+  offlineTxt: { fontSize: 12, color: "#92400e", fontWeight: "600" },
+
+  statsBar: { flexDirection: "row", backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
+  statItem: { flex: 1, alignItems: "center", paddingVertical: 12, borderRightWidth: 1, borderRightColor: "#f1f5f9" },
+  statVal: { fontSize: 16, fontWeight: "900", marginBottom: 2 },
+  statLabel: { fontSize: 10, color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" },
+
+  alertCard: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: "#fef2f2", borderLeftWidth: 4, borderLeftColor: "#dc2626", marginHorizontal: 16, marginTop: 14, borderRadius: 12, padding: 14 },
+  alertIcon: { fontSize: 20, marginTop: 1 },
+  alertTitle: { fontSize: 13, fontWeight: "800", color: "#dc2626", marginBottom: 2 },
+  alertBody: { fontSize: 12, color: "#7f1d1d", lineHeight: 17 },
+
+  nextDueCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#fffbeb", borderLeftWidth: 4, borderLeftColor: "#d97706", marginHorizontal: 16, marginTop: 14, borderRadius: 12, padding: 14 },
+  nextDueTitle: { fontSize: 13, fontWeight: "800", color: "#92400e", marginBottom: 2 },
+  nextDueBody: { fontSize: 12, color: "#78350f" },
 
   rowHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10, paddingHorizontal: 16 },
   rowLabel: { fontSize: 13, fontWeight: "700", color: "#475569", textTransform: "uppercase", letterSpacing: 0.5 },

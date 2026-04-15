@@ -388,6 +388,42 @@ export default function CreditScreen({ collector }) {
     setDone(null);
   };
 
+  // ── Step progress indicator ─────────────────────────────────────────────────
+  const totalSteps = paymentType === 'savings' ? 4 : 5;
+  const stepLabels = paymentType === 'savings'
+    ? ['Customer', 'Type', 'Account', 'Amount']
+    : ['Customer', 'Type', 'Account', paymentType === 'loan' ? 'Loan' : 'HP', 'Amount'];
+
+  function StepBar() {
+    return (
+      <View style={styles.stepBar}>
+        {stepLabels.map((label, i) => {
+          const n = i + 1;
+          const done_ = step > n;
+          const active = step === n;
+          return (
+            <React.Fragment key={label}>
+              <View style={styles.stepBarItem}>
+                <View style={[styles.stepBarDot,
+                  done_   && { backgroundColor: '#16a34a', borderColor: '#16a34a' },
+                  active  && { backgroundColor: '#1a56db', borderColor: '#1a56db' },
+                ]}>
+                  <Text style={[styles.stepBarNum, (done_ || active) && { color: '#fff' }]}>
+                    {done_ ? '✓' : n}
+                  </Text>
+                </View>
+                <Text style={[styles.stepBarLabel, active && { color: '#1a56db', fontWeight: '700' }]}>{label}</Text>
+              </View>
+              {i < stepLabels.length - 1 && (
+                <View style={[styles.stepBarLine, done_ && { backgroundColor: '#16a34a' }]} />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </View>
+    );
+  }
+
   // ── Success screen ──────────────────────────────────────────────────────────
   if (done) {
     const pt = PAYMENT_TYPES.find(t => t.key === done.paymentType);
@@ -432,6 +468,9 @@ export default function CreditScreen({ collector }) {
   return (
     <ScrollView style={styles.root} contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
       <Text style={styles.pageTitle}>Record Collection</Text>
+
+      {/* ── Step progress bar ── */}
+      {selectedCustomer && <StepBar />}
 
       {/* ── Step 1: Customer Search ── */}
       <View style={styles.stepCard}>
@@ -561,6 +600,14 @@ export default function CreditScreen({ collector }) {
       {selectedCustomer && step >= 5 && selectedAccount && (
         <View style={styles.stepCard}>
           <Text style={styles.stepLabel}>{paymentType !== 'savings' ? 'STEP 5' : 'STEP 4'} · AMOUNT</Text>
+
+          {/* Account balance preview */}
+          <View style={styles.balPreview}>
+            <Text style={styles.balPreviewLabel}>Account Balance</Text>
+            <Text style={styles.balPreviewVal}>{GHS(selectedAccount.balance)}</Text>
+            <Text style={styles.balPreviewAcct}>{selectedAccount.account_number}</Text>
+          </View>
+
           <TextInput
             style={[styles.input, styles.amountInput]}
             placeholder="0.00"
@@ -570,6 +617,29 @@ export default function CreditScreen({ collector }) {
             keyboardType="decimal-pad"
             autoFocus
           />
+
+          {/* Quick-fill buttons */}
+          {paymentType === 'loan' && selectedLoan && (
+            <View style={styles.quickRow}>
+              <Text style={styles.quickLabel}>Quick fill:</Text>
+              {[selectedLoan.monthly_payment, selectedLoan.outstanding].filter(v => v > 0).map((v, i) => (
+                <TouchableOpacity key={i} style={styles.quickBtn} onPress={() => setAmount(String(v))}>
+                  <Text style={styles.quickBtnTxt}>{i === 0 ? 'Monthly' : 'Full'} {GHS(v)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {paymentType === 'hp' && selectedHP && (
+            <View style={styles.quickRow}>
+              <Text style={styles.quickLabel}>Quick fill:</Text>
+              {[selectedHP.suggested_payment, selectedHP.remaining].filter(v => v > 0).map((v, i) => (
+                <TouchableOpacity key={i} style={styles.quickBtn} onPress={() => setAmount(String(v))}>
+                  <Text style={styles.quickBtnTxt}>{i === 0 ? 'Suggested' : 'Full'} {GHS(v)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           {paymentType === 'loan' && selectedLoan && (
             <Text style={styles.hint}>Outstanding: {GHS(selectedLoan.outstanding)} · Monthly: {GHS(selectedLoan.monthly_payment)}</Text>
           )}
@@ -646,6 +716,23 @@ const styles = StyleSheet.create({
   btnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   hint: { fontSize: 12, color: '#64748b', textAlign: 'center', marginBottom: 4 },
   emptyText: { color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 12 },
+  // Step bar
+  stepBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#e2e8f0' },
+  stepBarItem: { alignItems: 'center', flex: 0 },
+  stepBarDot: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: '#e2e8f0', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  stepBarNum: { fontSize: 11, fontWeight: '800', color: '#94a3b8' },
+  stepBarLabel: { fontSize: 9, color: '#94a3b8', fontWeight: '600', textTransform: 'uppercase' },
+  stepBarLine: { flex: 1, height: 2, backgroundColor: '#e2e8f0', marginBottom: 14 },
+  // Balance preview
+  balPreview: { backgroundColor: '#f0fdf4', borderRadius: 10, padding: 12, marginBottom: 12, alignItems: 'center', borderWidth: 1, borderColor: '#86efac' },
+  balPreviewLabel: { fontSize: 10, color: '#16a34a', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  balPreviewVal: { fontSize: 22, fontWeight: '900', color: '#15803d', marginTop: 2 },
+  balPreviewAcct: { fontSize: 11, color: '#64748b', marginTop: 2, fontFamily: 'monospace' },
+  // Quick fill
+  quickRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 },
+  quickLabel: { fontSize: 11, color: '#94a3b8', fontWeight: '600' },
+  quickBtn: { backgroundColor: '#eff6ff', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#bfdbfe' },
+  quickBtnTxt: { fontSize: 11, color: '#1d4ed8', fontWeight: '700' },
   // Success
   successContainer: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#f8fafc' },
   successIcon: { marginBottom: 16 },

@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -14,12 +13,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.majupat.customer",
-      "infoPlist": {
-        "UIBackgroundModes": [
-          "remote-notification"
-        ]
-      }
+      "bundleIdentifier": "com.majupat.customer"
     },
     "android": {
       "adaptiveIcon": {
@@ -27,28 +21,46 @@
         "backgroundColor": "#0a0f1e"
       },
       "package": "com.majupat.customer",
-      "versionCode": 2,
-      "edgeToEdgeEnabled": false,
+      "versionCode": 3,
       "minSdkVersion": 24,
-      "targetSdkVersion": 35,
       "permissions": [
-        "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
       ]
     },
     "plugins": [
+      "expo-font",
+      "expo-system-ui",
       [
-        "expo-notifications",
+        "expo-splash-screen",
         {
-          "icon": "./assets/icon.png",
-          "color": "#2563eb",
-          "sounds": []
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0a0f1e"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "35.0.0",
+            "kotlinVersion": "1.9.24"
+          }
+        }
+      ],
+      [
+        "./plugins/withGradleVersion",
+        {
+          "gradleVersion": "8.7"
         }
       ]
     ],
+    "owner": "maxbryan",
     "extra": {
       "eas": {
-        "projectId": "46a1657e-cc51-4736-bbbd-1682703b03e4"
+        "projectId": "4c5b7fff-e8ce-4c71-a005-3d61a4612502"
       }
     }
   }

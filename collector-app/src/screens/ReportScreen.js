@@ -207,18 +207,41 @@ export default function ReportScreen({ collector }) {
 
       {/* Summary */}
       <View style={[styles.summaryCard, { borderLeftColor: '#1a56db' }]}>
-        <Text style={styles.summaryLabel}>Total Collected</Text>
-        <Text style={[styles.summaryValue, { color: '#1a56db' }]}>{GHS(total)}</Text>
-        <Text style={styles.summaryCount}>{filtered.length} collections{search ? ' (filtered)' : ''}</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <View>
+            <Text style={styles.summaryLabel}>Total Collected</Text>
+            <Text style={[styles.summaryValue, { color: '#1a56db' }]}>{GHS(total)}</Text>
+            <Text style={styles.summaryCount}>{filtered.length} collections{search ? ' (filtered)' : ''}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={styles.summaryLabel}>Avg per Collection</Text>
+            <Text style={{ fontSize: 18, fontWeight: '800', color: '#0f172a', marginTop: 4 }}>
+              {filtered.length > 0 ? GHS(total / filtered.length) : GHS(0)}
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.typeRow}>
-        {Object.entries(byType).map(([key, val]) => (
-          <View key={key} style={[styles.typeCard, { borderTopColor: PT_COLOR[key] }]}>
-            <Text style={[styles.typeCardLabel, { color: PT_COLOR[key] }]}>{PT_LABEL[key]}</Text>
-            <Text style={styles.typeCardValue}>{GHS(val)}</Text>
-          </View>
-        ))}
+        {Object.entries(byType).map(([key, val]) => {
+          const count = filtered.filter(c => (c.payment_type || 'savings') === key).length;
+          const pct   = total > 0 ? ((val / total) * 100).toFixed(0) : 0;
+          return (
+            <View key={key} style={[styles.typeCard, { borderTopColor: PT_COLOR[key] }]}>
+              <Text style={[styles.typeCardLabel, { color: PT_COLOR[key] }]}>{PT_LABEL[key]}</Text>
+              <Text style={styles.typeCardValue}>{GHS(val)}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                <Text style={{ fontSize: 10, color: '#94a3b8', fontWeight: '600' }}>{count} txns</Text>
+                <Text style={{ fontSize: 10, color: PT_COLOR[key], fontWeight: '700' }}>{pct}%</Text>
+              </View>
+              {total > 0 && (
+                <View style={{ height: 3, borderRadius: 2, backgroundColor: '#f1f5f9', marginTop: 6 }}>
+                  <View style={{ height: '100%', borderRadius: 2, backgroundColor: PT_COLOR[key], width: pct + '%' }} />
+                </View>
+              )}
+            </View>
+          );
+        })}
       </View>
 
       {/* List */}
@@ -238,25 +261,27 @@ export default function ReportScreen({ collector }) {
           const acc = c.accounts;
           return (
             <View key={c.id || i} style={styles.collectionCard}>
-              <View style={styles.collectionHeader}>
+              <View style={[styles.collectionHeader, { borderLeftWidth: 3, borderLeftColor: PT_COLOR[pt] }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.collectionCustomer}>{c.customer_name || '—'}</Text>
                   <Text style={styles.collectionDate}>{fmtDate(c.created_at)}</Text>
                 </View>
-                <View style={[styles.ptBadge, { backgroundColor: PT_COLOR[pt] + '20' }]}>
-                  <Text style={[styles.ptBadgeText, { color: PT_COLOR[pt] }]}>{PT_LABEL[pt]}</Text>
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  <View style={[styles.ptBadge, { backgroundColor: PT_COLOR[pt] + '20' }]}>
+                    <Text style={[styles.ptBadgeText, { color: PT_COLOR[pt] }]}>{PT_LABEL[pt]}</Text>
+                  </View>
+                  <Text style={{ fontSize: 15, fontWeight: '900', color: '#16a34a' }}>{GHS(c.amount)}</Text>
                 </View>
               </View>
               <View style={styles.collectionBody}>
                 {[
-                  ['Amount',      GHS(c.amount),           '#16a34a'],
-                  ['Account',     acc?.account_number || '—', null],
-                  ['Acct Balance',acc ? GHS(acc.balance) : '—', null],
+                  acc?.account_number ? ['Account', acc.account_number, null] : null,
+                  acc ? ['Balance', GHS(acc.balance), null] : null,
                   c.notes ? ['Notes', c.notes, null] : null,
-                ].filter(Boolean).map(([k, v, color]) => (
+                ].filter(Boolean).map(([k, v]) => (
                   <View key={k} style={styles.collectionRow}>
                     <Text style={styles.collectionLabel}>{k}</Text>
-                    <Text style={[styles.collectionValue, color && { color, fontWeight: '800' }]}>{v}</Text>
+                    <Text style={styles.collectionValue}>{v}</Text>
                   </View>
                 ))}
               </View>
@@ -295,7 +320,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 15, fontWeight: '700', color: '#475569', marginBottom: 4 },
   emptyHint: { fontSize: 12, color: '#94a3b8' },
   collectionCard: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#e2e8f0', elevation: 1, overflow: 'hidden' },
-  collectionHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', backgroundColor: '#fafafa' },
+  collectionHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', backgroundColor: '#fafafa', gap: 8 },
   collectionCustomer: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   collectionDate: { fontSize: 11, color: '#94a3b8', marginTop: 2 },
   ptBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },

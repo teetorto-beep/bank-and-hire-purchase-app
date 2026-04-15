@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Wallet, ArrowLeftRight, CreditCard,
   Truck, BarChart3, Settings, ChevronDown, ChevronRight, LogOut,
   PlusCircle, List, Search, UserCheck, FileText, Calculator,
-  Receipt, Package, ShoppingBag, UserCog, Clock, Eye, BookOpen, CheckCircle
+  Receipt, Package, ShoppingBag, UserCog, Clock, Eye, BookOpen, CheckCircle, Monitor
 } from 'lucide-react';
 import { authDB } from '../../core/db';
 
@@ -33,6 +33,13 @@ const NAV = [
       { label: 'Approvals Queue', path: '/transactions/approvals', icon: Clock },
       { label: 'Account Statement', path: '/transactions/statement', icon: BookOpen },
       { label: 'History', path: '/transactions', icon: List },
+    ]
+  },
+  {
+    label: 'Teller', icon: Monitor,
+    children: [
+      { label: 'Teller Session', path: '/teller/session', icon: Receipt },
+      { label: 'Teller Report', path: '/reports/teller', icon: FileText },
     ]
   },
   {
@@ -67,6 +74,7 @@ const NAV = [
 
 // Map nav labels to permission module names
 const MODULE_MAP = {
+  'Teller':         'Teller',
   'Dashboard':      'Dashboard',
   'Customers':      'Customers',
   'Accounts':       'Accounts',
@@ -84,7 +92,7 @@ const MODULE_MAP = {
 const ROLE_PERMISSIONS = {
   admin:     null, // null = all access
   manager:   ['Dashboard','Customers','Accounts','Transactions','Loans','Collections','Products','HP Items','Reports','GL & Accounting','Approvals'],
-  teller:    ['Dashboard','Customers','Accounts','Transactions','Collections'],
+  teller:    ['Dashboard','Customers','Accounts','Transactions','Teller','Collections'],
   collector: ['Dashboard','Collections'],
   viewer:    ['Dashboard','Reports'],
 };

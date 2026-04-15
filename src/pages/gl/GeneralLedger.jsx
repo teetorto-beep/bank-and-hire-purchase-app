@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { glDB, authDB, syncAllToGL } from '../../core/db';
 import { exportCSV, exportReportPDF } from '../../core/export';
-import { BookOpen, Plus, Download, FileText, Edit2, Trash2, Search, PenLine, Trash, RefreshCw } from 'lucide-react';
+import { BookOpen, Plus, Download, FileText, Edit2, Trash2, Search, PenLine, Trash, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import Modal from '../../components/ui/Modal';
 
 const GHS = (n) => 'GH₵ ' + Number(n||0).toLocaleString('en-GH',{minimumFractionDigits:2});
@@ -185,9 +186,29 @@ export default function GeneralLedger() {
     return g;
   },[expByAcc,accounts]);
 
-  const grossProfit = (revGroups['interest_income']?.total||0) - (revGroups['interest_expense']?.total||0) - (expGroups['interest_expense']?.total||0);
-  const operatingProfit = totRev - (expGroups['operating_expense']?.total||0) - (expGroups['interest_expense']?.total||0);
+  // Gross Profit = Interest Income - Interest Expense (cost of funds)
+  const grossProfit = (revGroups['interest_income']?.total||0) - (expGroups['interest_expense']?.total||0);
+  // Operating Profit = Gross Profit - Operating Expenses
+  const operatingProfit = grossProfit - (expGroups['operating_expense']?.total||0) - (expGroups['provision']?.total||0);
   const profitMargin = totRev > 0 ? ((netProfit/totRev)*100).toFixed(1) : '0.0';
+  const expenseRatio = totRev > 0 ? ((totExp/totRev)*100).toFixed(1) : '0.0';
+
+  // Chart data: revenue vs expense by category
+  const pnlChartData = useMemo(()=>{
+    const cats = new Set([
+      ...Object.keys(revGroups),
+      ...Object.keys(expGroups),
+    ]);
+    return Array.from(cats).map(cat=>{
+      const label = cat.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+      return {
+        name: label.length > 14 ? label.slice(0,13)+'…' : label,
+        fullName: label,
+        revenue: revGroups[cat]?.total || 0,
+        expense: expGroups[cat]?.total || 0,
+      };
+    }).filter(d=>d.revenue>0||d.expense>0);
+  },[revGroups,expGroups]);
 
   const trialBal = useMemo(()=>{
     const m={};
@@ -429,44 +450,73 @@ export default function GeneralLedger() {
       )}
       {tab==="pnl"&&(
         <div>
+          {/* Header row with period label + export buttons */}
+          <div style={{marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text-3)"}}>
+              Profit &amp; Loss Statement &mdash; <span style={{color:"var(--text-1)"}}>{year}{month ? " \u00B7 " + MONTHS[month] : " \u00B7 Full Year"}</span>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-secondary btn-sm" onClick={()=>exportCSV([
+                ...revByAcc.map(r=>({Section:"Revenue",Code:r.code,Account:r.name,Amount:r.total,Pct:totRev>0?((r.total/totRev)*100).toFixed(1)+"%":"0%"})),
+                ...expByAcc.map(r=>({Section:"Expense",Code:r.code,Account:r.name,Amount:r.total,Pct:totExp>0?((r.total/totExp)*100).toFixed(1)+"%":"0%"})),
+                {Section:"",Code:"",Account:"NET PROFIT / LOSS",Amount:netProfit,Pct:""},
+              ],"profit-loss-"+year+(month?"-"+MONTHS[month]:""))}><Download size={13}/>CSV</button>
+              <button className="btn btn-primary btn-sm" onClick={()=>exportReportPDF({
+                title:"Profit & Loss Statement",
+                subtitle:"Period: "+year+(month?" - "+MONTHS[month]:"")+" | Net "+(netProfit>=0?"Profit":"Loss")+": GHC "+Math.abs(netProfit).toLocaleString("en-GH",{minimumFractionDigits:2}),
+                columns:["Section","Code","Account","Amount (GHC)","%"],
+                rows:[
+                  ...revByAcc.map(r=>["Revenue",r.code,r.name,"GHC "+r.total.toLocaleString("en-GH",{minimumFractionDigits:2}),totRev>0?((r.total/totRev)*100).toFixed(1)+"%":"0%"]),
+                  ["","","TOTAL REVENUE","GHC "+totRev.toLocaleString("en-GH",{minimumFractionDigits:2}),"100%"],
+                  ...expByAcc.map(r=>["Expense",r.code,r.name,"GHC "+r.total.toLocaleString("en-GH",{minimumFractionDigits:2}),totExp>0?((r.total/totExp)*100).toFixed(1)+"%":"0%"]),
+                  ["","","TOTAL EXPENSES","GHC "+totExp.toLocaleString("en-GH",{minimumFractionDigits:2}),"100%"],
+                  ["","","NET "+(netProfit>=0?"PROFIT":"LOSS"),"GHC "+Math.abs(netProfit).toLocaleString("en-GH",{minimumFractionDigits:2}),""],
+                ],
+                summary:[["Profit Margin",profitMargin+"%"],["Expense Ratio",expenseRatio+"%"],["Revenue Accounts",revByAcc.length],["Expense Accounts",expByAcc.length]],
+              })}><FileText size={13}/>PDF</button>
+            </div>
+          </div>
+
           {/* KPI Summary Row */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:20}}>
             {[
-              {label:"Total Revenue",value:GHS(totRev),color:"var(--green)",sub:`${revByAcc.length} income accounts`},
-              {label:"Total Expenses",value:GHS(totExp),color:"var(--red)",sub:`${expByAcc.length} expense accounts`},
-              {label:"Gross Profit",value:GHS(Math.abs(grossProfit)),color:grossProfit>=0?"var(--green)":"var(--red)",sub:grossProfit>=0?"Profit":"Loss"},
-              {label:"Operating Profit",value:GHS(Math.abs(operatingProfit)),color:operatingProfit>=0?"var(--green)":"var(--red)",sub:operatingProfit>=0?"Profit":"Loss"},
-              {label:netProfit>=0?"Net Profit":"Net Loss",value:GHS(Math.abs(netProfit)),color:netProfit>=0?"var(--green)":"var(--red)",sub:`Margin: ${profitMargin}%`},
+              {label:"Total Revenue",value:GHS(totRev),color:"var(--green)",sub:revByAcc.length+" income accounts",icon:<TrendingUp size={16}/>},
+              {label:"Total Expenses",value:GHS(totExp),color:"var(--red)",sub:"Expense ratio: "+expenseRatio+"%",icon:<TrendingDown size={16}/>},
+              {label:"Gross Profit",value:GHS(Math.abs(grossProfit)),color:grossProfit>=0?"var(--green)":"var(--red)",sub:grossProfit>=0?"Interest spread":"Interest loss",icon:grossProfit>=0?<TrendingUp size={16}/>:<TrendingDown size={16}/>},
+              {label:"Operating Profit",value:GHS(Math.abs(operatingProfit)),color:operatingProfit>=0?"var(--green)":"var(--red)",sub:operatingProfit>=0?"After operating costs":"Operating loss",icon:operatingProfit>=0?<TrendingUp size={16}/>:<TrendingDown size={16}/>},
+              {label:netProfit>=0?"Net Profit":"Net Loss",value:GHS(Math.abs(netProfit)),color:netProfit>=0?"var(--green)":"var(--red)",sub:"Margin: "+profitMargin+"%",icon:netProfit>=0?<TrendingUp size={16}/>:<TrendingDown size={16}/>},
             ].map(s=>(
-              <div key={s.label} className="card" style={{padding:16,borderLeft:`4px solid ${s.color}`}}>
-                <div style={{fontSize:10,color:"var(--text-3)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>{s.label}</div>
+              <div key={s.label} className="card" style={{padding:16,borderTop:"3px solid "+s.color}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                  <div style={{fontSize:10,color:"var(--text-3)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{s.label}</div>
+                  <span style={{color:s.color,opacity:.7}}>{s.icon}</span>
+                </div>
                 <div style={{fontSize:18,fontWeight:900,color:s.color,marginBottom:2}}>{s.value}</div>
                 <div style={{fontSize:11,color:"var(--text-3)"}}>{s.sub}</div>
               </div>
             ))}
           </div>
 
-          {/* Export buttons */}
-          <div style={{display:"flex",gap:8,marginBottom:16,justifyContent:"flex-end"}}>
-            <button className="btn btn-secondary btn-sm" onClick={()=>exportCSV([
-              ...revByAcc.map(r=>({Section:'Revenue',Code:r.code,Account:r.name,Amount:r.total})),
-              ...expByAcc.map(r=>({Section:'Expense',Code:r.code,Account:r.name,Amount:r.total})),
-              {Section:'',Code:'',Account:'NET PROFIT / LOSS',Amount:netProfit},
-            ],"profit-loss-"+year+(month?"-"+MONTHS[month]:""))}><Download size={13}/>CSV</button>
-            <button className="btn btn-primary btn-sm" onClick={()=>exportReportPDF({
-              title:"Profit & Loss Statement",
-              subtitle:`Period: ${year}${month?" - "+MONTHS[month]:""} | Net ${netProfit>=0?"Profit":"Loss"}: GHC ${Math.abs(netProfit).toLocaleString("en-GH",{minimumFractionDigits:2})}`,
-              columns:["Section","Code","Account","Amount (GHC)"],
-              rows:[
-                ...revByAcc.map(r=>["Revenue",r.code,r.name,"GHC "+r.total.toLocaleString("en-GH",{minimumFractionDigits:2})]),
-                ["","","TOTAL REVENUE","GHC "+totRev.toLocaleString("en-GH",{minimumFractionDigits:2})],
-                ...expByAcc.map(r=>["Expense",r.code,r.name,"GHC "+r.total.toLocaleString("en-GH",{minimumFractionDigits:2})]),
-                ["","","TOTAL EXPENSES","GHC "+totExp.toLocaleString("en-GH",{minimumFractionDigits:2})],
-                ["","","NET "+(netProfit>=0?"PROFIT":"LOSS"),"GHC "+Math.abs(netProfit).toLocaleString("en-GH",{minimumFractionDigits:2})],
-              ],
-              summary:[["Profit Margin",profitMargin+"%"],["Revenue Accounts",revByAcc.length],["Expense Accounts",expByAcc.length]],
-            })}><FileText size={13}/>PDF</button>
-          </div>
+          {/* Revenue vs Expense Chart */}
+          {pnlChartData.length>0&&(
+            <div className="card" style={{marginBottom:16,padding:"16px 16px 8px"}}>
+              <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:"var(--text-2)"}}>Revenue vs Expenses by Category</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={pnlChartData} margin={{top:0,right:16,left:0,bottom:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                  <XAxis dataKey="name" tick={{fontSize:11,fill:"var(--text-3)"}} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fontSize:11,fill:"var(--text-3)"}} axisLine={false} tickLine={false} tickFormatter={v=>v>=1000?"GH\u20B5"+(v/1000).toFixed(0)+"k":"GH\u20B5"+v}/>
+                  <Tooltip formatter={(val,name)=>[GHS(val),name==="revenue"?"Revenue":"Expense"]} labelFormatter={(_,payload)=>payload?.[0]?.payload?.fullName||""} contentStyle={{fontSize:12,borderRadius:8,border:"1px solid var(--border)"}}/>
+                  <Bar dataKey="revenue" fill="#10b981" radius={[4,4,0,0]} name="revenue" maxBarSize={40}/>
+                  <Bar dataKey="expense" fill="#ef4444" radius={[4,4,0,0]} name="expense" maxBarSize={40}/>
+                </BarChart>
+              </ResponsiveContainer>
+              <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:4,fontSize:11,color:"var(--text-3)"}}>
+                <span style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,borderRadius:2,background:"#10b981",display:"inline-block"}}/> Revenue</span>
+                <span style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,borderRadius:2,background:"#ef4444",display:"inline-block"}}/> Expense</span>
+              </div>
+            </div>
+          )}
 
           {/* Income Statement Layout */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
@@ -486,14 +536,25 @@ export default function GeneralLedger() {
                 <div>
                   {Object.entries(revGroups).map(([cat,grp])=>(
                     <div key={cat} style={{marginBottom:12}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:".06em",padding:"6px 16px",background:"var(--surface-2)",borderBottom:"1px solid var(--border)"}}>{grp.label}</div>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:".06em",padding:"6px 16px",background:"var(--surface-2)",borderBottom:"1px solid var(--border)"}}>
+                        <span>{grp.label}</span>
+                        <span style={{color:"var(--green)"}}>{totRev>0?((grp.total/totRev)*100).toFixed(1)+"%":""}</span>
+                      </div>
                       {grp.items.map(r=>(
-                        <div key={r.code} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 16px",borderBottom:"1px solid var(--border)"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span className="font-mono" style={{fontSize:11,color:"var(--green)",fontWeight:700,minWidth:36}}>{r.code}</span>
-                            <span style={{fontSize:13}}>{r.name}</span>
+                        <div key={r.code} style={{padding:"8px 16px",borderBottom:"1px solid var(--border)"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span className="font-mono" style={{fontSize:11,color:"var(--green)",fontWeight:700,minWidth:36}}>{r.code}</span>
+                              <span style={{fontSize:13}}>{r.name}</span>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:11,color:"var(--text-3)"}}>{totRev>0?((r.total/totRev)*100).toFixed(1)+"%":""}</span>
+                              <span className="font-mono" style={{fontWeight:700,color:"var(--green)"}}>{GHS(r.total)}</span>
+                            </div>
                           </div>
-                          <span className="font-mono" style={{fontWeight:700,color:"var(--green)"}}>{GHS(r.total)}</span>
+                          {totRev>0&&<div style={{height:3,borderRadius:2,background:"var(--border)"}}>
+                            <div style={{height:"100%",borderRadius:2,background:"var(--green)",width:((r.total/totRev)*100).toFixed(1)+"%"}}/>
+                          </div>}
                         </div>
                       ))}
                       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 16px",background:"#f0fdf4",borderBottom:"1px solid var(--border)"}}>
@@ -525,14 +586,25 @@ export default function GeneralLedger() {
                 <div>
                   {Object.entries(expGroups).map(([cat,grp])=>(
                     <div key={cat} style={{marginBottom:12}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:".06em",padding:"6px 16px",background:"var(--surface-2)",borderBottom:"1px solid var(--border)"}}>{grp.label}</div>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:700,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:".06em",padding:"6px 16px",background:"var(--surface-2)",borderBottom:"1px solid var(--border)"}}>
+                        <span>{grp.label}</span>
+                        <span style={{color:"var(--red)"}}>{totExp>0?((grp.total/totExp)*100).toFixed(1)+"%":""}</span>
+                      </div>
                       {grp.items.map(r=>(
-                        <div key={r.code} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 16px",borderBottom:"1px solid var(--border)"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span className="font-mono" style={{fontSize:11,color:"var(--red)",fontWeight:700,minWidth:36}}>{r.code}</span>
-                            <span style={{fontSize:13}}>{r.name}</span>
+                        <div key={r.code} style={{padding:"8px 16px",borderBottom:"1px solid var(--border)"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span className="font-mono" style={{fontSize:11,color:"var(--red)",fontWeight:700,minWidth:36}}>{r.code}</span>
+                              <span style={{fontSize:13}}>{r.name}</span>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:11,color:"var(--text-3)"}}>{totExp>0?((r.total/totExp)*100).toFixed(1)+"%":""}</span>
+                              <span className="font-mono" style={{fontWeight:700,color:"var(--red)"}}>{GHS(r.total)}</span>
+                            </div>
                           </div>
-                          <span className="font-mono" style={{fontWeight:700,color:"var(--red)"}}>{GHS(r.total)}</span>
+                          {totExp>0&&<div style={{height:3,borderRadius:2,background:"var(--border)"}}>
+                            <div style={{height:"100%",borderRadius:2,background:"var(--red)",width:((r.total/totExp)*100).toFixed(1)+"%"}}/>
+                          </div>}
                         </div>
                       ))}
                       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 16px",background:"#fef2f2",borderBottom:"1px solid var(--border)"}}>
@@ -550,26 +622,32 @@ export default function GeneralLedger() {
             </div>
           </div>
 
-          {/* Bottom summary: Gross → Operating → Net */}
+          {/* Bottom summary: Gross -> Operating -> Net */}
           <div className="card" style={{padding:0,overflow:"hidden"}}>
             {[
-              {label:"Gross Profit",desc:"Interest Income minus Interest Expense",value:grossProfit},
-              {label:"Operating Profit",desc:"Revenue minus Operating & Interest Expenses",value:operatingProfit},
-              {label:netProfit>=0?"NET PROFIT":"NET LOSS",desc:`Profit Margin: ${profitMargin}% · Total Revenue: ${GHS(totRev)}`,value:netProfit,big:true},
+              {label:"Gross Profit",desc:"Interest Income minus Interest Expense (cost of funds)",value:grossProfit},
+              {label:"Operating Profit",desc:"Gross Profit minus Operating Expenses & Provisions",value:operatingProfit},
+              {label:netProfit>=0?"NET PROFIT":"NET LOSS",desc:"Profit Margin: "+profitMargin+"% \u00B7 Expense Ratio: "+expenseRatio+"% \u00B7 Revenue: "+GHS(totRev),value:netProfit,big:true},
             ].map((row,i)=>(
               <div key={row.label} style={{
                 display:"flex",justifyContent:"space-between",alignItems:"center",
                 padding:row.big?"20px 24px":"14px 24px",
                 background:row.big?(row.value>=0?"var(--green-bg)":"var(--red-bg)"):(i%2===0?"var(--surface)":"var(--surface-2)"),
                 borderBottom:i<2?"1px solid var(--border)":"none",
-                borderLeft:`4px solid ${row.value>=0?"var(--green)":"var(--red)"}`,
+                borderLeft:"4px solid "+(row.value>=0?"var(--green)":"var(--red)"),
               }}>
                 <div>
-                  <div style={{fontWeight:row.big?900:700,fontSize:row.big?15:13,color:row.value>=0?"var(--green)":"var(--red)"}}>{row.label}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,fontWeight:row.big?900:700,fontSize:row.big?15:13,color:row.value>=0?"var(--green)":"var(--red)"}}>
+                    {row.value>0?<TrendingUp size={14}/>:row.value<0?<TrendingDown size={14}/>:<Minus size={14}/>}
+                    {row.label}
+                  </div>
                   <div style={{fontSize:11,color:"var(--text-3)",marginTop:2}}>{row.desc}</div>
                 </div>
-                <div style={{fontWeight:900,fontSize:row.big?26:18,color:row.value>=0?"var(--green)":"var(--red)"}}>
-                  {row.value<0&&"-"}{GHS(Math.abs(row.value))}
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontWeight:900,fontSize:row.big?26:18,color:row.value>=0?"var(--green)":"var(--red)"}}>
+                    {row.value<0&&"-"}{GHS(Math.abs(row.value))}
+                  </div>
+                  {row.big&&totRev>0&&<div style={{fontSize:11,color:"var(--text-3)",marginTop:2}}>{profitMargin}% margin</div>}
                 </div>
               </div>
             ))}
