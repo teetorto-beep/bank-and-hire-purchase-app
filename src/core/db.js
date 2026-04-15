@@ -368,10 +368,12 @@ export const transactionsDB = {
     const hpId = payload.hp_agreement_id || payload.hpAgreementId;
 
     if (loanId && type === 'debit') {
-      const { data: loan, error: loanFetchErr } = await supabase.from('loans').select('outstanding, hp_agreement_id').eq('id', loanId).single();
+      const { data: loan, error: loanFetchErr } = await supabase.from('loans').select('outstanding, hp_agreement_id, monthly_payment, tenure').eq('id', loanId).single();
       if (loanFetchErr) console.error('Loan fetch error:', loanFetchErr.message);
       if (loan) {
         const newOutstanding = Math.max(0, Number(loan.outstanding) - amount);
+        // Loan is complete only when outstanding reaches 0
+        // outstanding was set to totalRepayable (principal+interest) on creation
         const { error: loanUpdErr } = await supabase.from('loans').update({
           outstanding: newOutstanding,
           status: newOutstanding <= 0 ? 'completed' : 'active',

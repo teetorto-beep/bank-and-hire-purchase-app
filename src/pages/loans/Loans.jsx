@@ -160,10 +160,9 @@ export default function Loans() {
     setSaving(true); setError('');
     try {
       const loan = repayModal;
-      const newOutstanding = Math.max(0, Number(loan.outstanding) - amt);
-      const newStatus = newOutstanding <= 0 ? 'completed' : loan.status;
 
       if (loan.hpAgreementId) {
+        // HP repayment path
         await recordHPPayment({
           agreementId: loan.hpAgreementId,
           amount: amt,
@@ -171,20 +170,28 @@ export default function Loans() {
           collectedBy: user?.name,
         });
       } else {
-        await updateLoan(loan.id, {
-          outstanding: newOutstanding,
-          status: newStatus,
-          last_payment_date: new Date().toISOString(),
-          next_due_date: new Date(Date.now() + 30 * 86400000).toISOString(),
-        });
+        // Regular loan repayment:
+        // postTransaction with type='debit' + loanId will:
+        //   1. Debit the account (reduce balance) — money leaves account to pay loan
+        //   2. Reduce loan outstanding automatically
+        //   3. Mark loan completed only when outstanding reaches 0 (principal + interest)
         if (loan.accountId) {
           await postTransaction({
-            accountId: loan.accountId,
-            type: 'debit',
-            amount: amt,
-            narration: `Loan repayment — ${loan.purpose || loan.type}`,
-            channel: 'teller',
-            loanId: loan.id,
+            accountId:  loan.accountId,
+            type:       'debit',
+            amount:     amt,
+            narration:  `Loan repayment — ${loan.purpose || loan.type}`,
+            channel:    'teller',
+            loanId:     loan.id,
+          });
+        } else {
+          // No account linked — update loan directly
+          const newOutstanding = Math.max(0, Number(loan.outstanding) - amt);
+          await updateLoan(loan.id, {
+            outstanding:       newOutstanding,
+            status:            newOutstanding <= 0 ? 'completed' : loan.status,
+            last_payment_date: new Date().toISOString(),
+            next_due_date:     new Date(Date.now() + 30 * 86400000).toISOString(),
           });
         }
       }
