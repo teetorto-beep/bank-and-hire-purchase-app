@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { usersDB } from '../../core/db';
 import Modal from '../../components/ui/Modal';
-import { Plus, Edit2, Trash2, Shield, Eye, EyeOff, UserCheck, UserX, Settings } from 'lucide-react';
+import { Plus, Edit2, Trash2, Shield, Eye, EyeOff, UserCheck, UserX, Settings, CheckCircle, XCircle } from 'lucide-react';
 
 const ROLES = [
   { value: 'admin',     label: 'Admin',     desc: 'Full system access',                color: '#1e40af', bg: 'var(--blue-bg)' },
@@ -11,16 +11,66 @@ const ROLES = [
   { value: 'viewer',    label: 'Viewer',    desc: 'Read-only access',                  color: '#475569', bg: '#f1f5f9' },
 ];
 
-const ALL_MODULES = [
-  'Dashboard', 'Customers', 'Accounts', 'Transactions', 'Loans',
-  'Collections', 'Products', 'HP Items', 'Reports', 'GL & Accounting',
-  'Approvals', 'Settings', 'User Management',
+// Grouped modules with icons for better UX
+const MODULE_GROUPS = [
+  {
+    group: 'Core',
+    color: '#1e40af',
+    modules: [
+      { name: 'Dashboard',       icon: '🏠', desc: 'Main dashboard & overview' },
+      { name: 'Customers',       icon: '👥', desc: 'Customer records & KYC' },
+      { name: 'Accounts',        icon: '🏦', desc: 'Account management' },
+    ],
+  },
+  {
+    group: 'Transactions & Teller',
+    color: '#065f46',
+    modules: [
+      { name: 'Transactions',    icon: '💳', desc: 'Post & view transactions' },
+      { name: 'Teller',          icon: '🖥️', desc: 'Teller session & daily report' },
+    ],
+  },
+  {
+    group: 'Lending',
+    color: '#7c3aed',
+    modules: [
+      { name: 'Loans',           icon: '📋', desc: 'Loans & HP agreements' },
+      { name: 'HP Items',        icon: '🛍️', desc: 'Hire purchase catalogue' },
+      { name: 'Products',        icon: '📦', desc: 'Bank products & savings plans' },
+    ],
+  },
+  {
+    group: 'Collections',
+    color: '#92400e',
+    modules: [
+      { name: 'Collections',     icon: '💰', desc: 'Field collections & collectors' },
+    ],
+  },
+  {
+    group: 'Finance & Reports',
+    color: '#0f766e',
+    modules: [
+      { name: 'Reports',         icon: '📊', desc: 'Analytics & reports' },
+      { name: 'GL & Accounting', icon: '📒', desc: 'General ledger & P&L' },
+    ],
+  },
+  {
+    group: 'Administration',
+    color: '#be185d',
+    modules: [
+      { name: 'Approvals',       icon: '✅', desc: 'Pending approval requests' },
+      { name: 'User Management', icon: '👤', desc: 'Manage system users' },
+      { name: 'Settings',        icon: '⚙️', desc: 'System configuration' },
+    ],
+  },
 ];
+
+const ALL_MODULES = MODULE_GROUPS.flatMap(g => g.modules.map(m => m.name));
 
 const DEFAULT_PERMISSIONS = {
   admin:     ALL_MODULES,
-  manager:   ['Dashboard','Customers','Accounts','Transactions','Loans','Collections','Products','HP Items','Reports','GL & Accounting','Approvals'],
-  teller:    ['Dashboard','Customers','Accounts','Transactions','Collections'],
+  manager:   ['Dashboard','Customers','Accounts','Transactions','Teller','Loans','Collections','Products','HP Items','Reports','GL & Accounting','Approvals'],
+  teller:    ['Dashboard','Customers','Accounts','Transactions','Teller','Collections'],
   collector: ['Dashboard','Collections'],
   viewer:    ['Dashboard','Reports'],
 };
@@ -296,31 +346,82 @@ export default function UserManagement() {
         </>}>
         {permModal && (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '10px 14px', background: roleInfo(permModal.role).bg, borderRadius: 8 }}>
-              <Shield size={16} style={{ color: roleInfo(permModal.role).color }} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 13, color: roleInfo(permModal.role).color }}>{roleInfo(permModal.role).label}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Toggle modules on/off for this specific user</div>
+            {/* User + role header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: '12px 14px', background: roleInfo(permModal.role).bg, borderRadius: 10, border: `1px solid ${roleInfo(permModal.role).color}30` }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: roleInfo(permModal.role).color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: '#fff', flexShrink: 0 }}>
+                {permModal.name?.[0]?.toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--text)' }}>{permModal.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                  <Shield size={11} style={{ color: roleInfo(permModal.role).color }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: roleInfo(permModal.role).color, textTransform: 'capitalize' }}>{permModal.role}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>— toggle modules on/off</span>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: roleInfo(permModal.role).color }}>{customPerms.length}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>of {ALL_MODULES.length} modules</div>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {ALL_MODULES.map(mod => {
-                const on = customPerms.includes(mod);
-                return (
-                  <label key={mod} onClick={() => togglePerm(mod)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-                      border: `2px solid ${on ? 'var(--green)' : 'var(--border)'}`,
-                      background: on ? 'var(--green-bg)' : 'var(--surface)', transition: 'all .15s' }}>
-                    <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${on ? 'var(--green)' : 'var(--border)'}`, background: on ? 'var(--green)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {on && <span style={{ color: '#fff', fontSize: 11, fontWeight: 900 }}>✓</span>}
-                    </div>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: on ? '#065f46' : 'var(--text-3)' }}>{mod}</span>
-                  </label>
-                );
-              })}
+
+            {/* Quick select buttons */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setCustomPerms(ALL_MODULES)}>Select All</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setCustomPerms([])}>Clear All</button>
+              <button className="btn btn-secondary btn-sm" onClick={resetPermsToRole}>
+                <Shield size={12} />Role Defaults
+              </button>
             </div>
-            <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-3)', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: 6 }}>
-              {customPerms.length} of {ALL_MODULES.length} modules enabled
+
+            {/* Grouped modules */}
+            {MODULE_GROUPS.map(grp => (
+              <div key={grp.group} style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ height: 2, width: 16, borderRadius: 2, background: grp.color }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: grp.color, textTransform: 'uppercase', letterSpacing: '.06em' }}>{grp.group}</span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                  <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                    {grp.modules.filter(m => customPerms.includes(m.name)).length}/{grp.modules.length}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {grp.modules.map(mod => {
+                    const on = customPerms.includes(mod.name);
+                    return (
+                      <div key={mod.name} onClick={() => togglePerm(mod.name)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                          border: `2px solid ${on ? grp.color : 'var(--border)'}`,
+                          background: on ? grp.color + '12' : 'var(--surface)',
+                          transition: 'all .15s',
+                        }}>
+                        <span style={{ fontSize: 16, flexShrink: 0 }}>{mod.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: on ? grp.color : 'var(--text)' }}>{mod.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{mod.desc}</div>
+                        </div>
+                        <div style={{
+                          width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                          border: `2px solid ${on ? grp.color : 'var(--border)'}`,
+                          background: on ? grp.color : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {on && <span style={{ color: '#fff', fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-3)', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: 6, display: 'flex', justifyContent: 'space-between' }}>
+              <span>{customPerms.length} of {ALL_MODULES.length} modules enabled</span>
+              {customPerms.length !== (DEFAULT_PERMISSIONS[permModal.role] || []).length && (
+                <span style={{ color: '#7c3aed', fontWeight: 700 }}>✦ Custom</span>
+              )}
             </div>
           </div>
         )}
@@ -330,26 +431,59 @@ export default function UserManagement() {
       <Modal open={!!detailUser} onClose={() => setDetailUser(null)} title={`Permissions — ${detailUser?.name}`}>
         {detailUser && (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: 14, background: roleInfo(detailUser.role).bg, borderRadius: 8 }}>
-              <Shield size={20} style={{ color: roleInfo(detailUser.role).color }} />
-              <div>
-                <div style={{ fontWeight: 700, color: roleInfo(detailUser.role).color }}>{roleInfo(detailUser.role).label}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                  {hasCustomPerms(detailUser) ? '✦ Custom permissions applied' : 'Using role defaults'}
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: '12px 14px', background: roleInfo(detailUser.role).bg, borderRadius: 10 }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: roleInfo(detailUser.role).color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: '#fff', flexShrink: 0 }}>
+                {detailUser.name?.[0]?.toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>{detailUser.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                  <Shield size={11} style={{ color: roleInfo(detailUser.role).color }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: roleInfo(detailUser.role).color, textTransform: 'capitalize' }}>{detailUser.role}</span>
+                  {hasCustomPerms(detailUser)
+                    ? <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, background: '#ede9fe', color: '#7c3aed', fontWeight: 700 }}>✦ Custom</span>
+                    : <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Role defaults</span>}
                 </div>
               </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: roleInfo(detailUser.role).color }}>{effectivePerms(detailUser).length}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>of {ALL_MODULES.length}</div>
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {ALL_MODULES.map(mod => {
-                const hasAccess = effectivePerms(detailUser).includes(mod);
-                return (
-                  <div key={mod} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 6, background: hasAccess ? 'var(--green-bg)' : 'var(--surface-2)', border: `1px solid ${hasAccess ? '#a7f3d0' : 'var(--border)'}` }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: hasAccess ? 'var(--green)' : 'var(--border-2)', flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: hasAccess ? '#065f46' : 'var(--text-3)' }}>{mod}</span>
-                  </div>
-                );
-              })}
-            </div>
+
+            {/* Grouped view */}
+            {MODULE_GROUPS.map(grp => (
+              <div key={grp.group} style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ height: 2, width: 16, borderRadius: 2, background: grp.color }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: grp.color, textTransform: 'uppercase', letterSpacing: '.06em' }}>{grp.group}</span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {grp.modules.map(mod => {
+                    const hasAccess = effectivePerms(detailUser).includes(mod.name);
+                    return (
+                      <div key={mod.name} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 12px', borderRadius: 8,
+                        background: hasAccess ? grp.color + '12' : 'var(--surface-2)',
+                        border: `1px solid ${hasAccess ? grp.color + '40' : 'var(--border)'}`,
+                      }}>
+                        <span style={{ fontSize: 16, flexShrink: 0, opacity: hasAccess ? 1 : 0.3 }}>{mod.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: hasAccess ? grp.color : 'var(--text-3)' }}>{mod.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>{mod.desc}</div>
+                        </div>
+                        {hasAccess
+                          ? <CheckCircle size={15} style={{ color: grp.color, flexShrink: 0 }} />
+                          : <XCircle size={15} style={{ color: 'var(--border-2)', flexShrink: 0 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Modal>

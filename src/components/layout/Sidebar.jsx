@@ -72,7 +72,6 @@ const NAV = [
   { label: 'Settings', path: '/settings', icon: Settings },
 ];
 
-// Map nav labels to permission module names
 const MODULE_MAP = {
   'Teller':         'Teller',
   'Dashboard':      'Dashboard',
