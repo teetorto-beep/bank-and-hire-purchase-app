@@ -479,73 +479,93 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
             </table>
           </div>
 
-          {/* Loan Summary */}
+          {/* Loan Summary — one section per loan */}
           {statement.acctLoans && statement.acctLoans.length > 0 && (
             <div style={{ padding: '20px 28px', borderTop: '1px solid #e2e8f0', background: '#fffbeb' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>📋</span> Loan Summary
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: '#1e293b' }}>
-                      {['Type', 'Disbursed', 'Principal', 'Rate', 'Monthly', 'Total Repayable', 'Outstanding', 'Status'].map((h, i) => (
-                        <th key={h} style={{ padding: '8px 10px', color: '#fff', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', textAlign: i >= 2 ? 'right' : 'left' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {statement.acctLoans.map((loan, i) => {
-                      const monthly = Number(loan.monthlyPayment || 0);
-                      const tenure  = Number(loan.tenure || 0);
-                      const principal = Number(loan.amount || 0);
-                      const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : principal;
-                      return (
-                        <tr key={loan.id} style={{ background: i % 2 === 0 ? '#fff' : '#fef9c3' }}>
-                          <td style={{ padding: '8px 10px', fontWeight: 600, textTransform: 'capitalize' }}>{(loan.type || '').replace(/_/g, ' ')}</td>
-                          <td style={{ padding: '8px 10px', color: '#64748b', fontSize: 11 }}>{loan.disbursedAt ? new Date(loan.disbursedAt).toLocaleDateString() : '\u2014'}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{GHS(principal)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right' }}>{loan.interestRate}%</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right' }}>{GHS(monthly)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(totalRepay)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: Number(loan.outstanding) > 0 ? '#dc2626' : '#16a34a' }}>{GHS(loan.outstanding)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                            <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 700, background: loan.status === 'active' ? '#dcfce7' : loan.status === 'overdue' ? '#fee2e2' : '#f1f5f9', color: loan.status === 'active' ? '#15803d' : loan.status === 'overdue' ? '#dc2626' : '#64748b' }}>
-                              {(loan.status || '').toUpperCase()}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>📋</span> Loan Summary ({statement.acctLoans.length} loan{statement.acctLoans.length > 1 ? 's' : ''})
               </div>
 
-              {statement.loanTransactions && statement.loanTransactions.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', marginBottom: 8 }}>Loan Repayments in Period</div>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                    <thead>
-                      <tr style={{ background: '#f1f5f9' }}>
-                        <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, color: '#64748b', fontWeight: 700 }}>Date</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, color: '#64748b', fontWeight: 700 }}>Reference</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, color: '#64748b', fontWeight: 700 }}>Description</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, color: '#64748b', fontWeight: 700 }}>Amount Paid</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {statement.loanTransactions.map((t, i) => (
-                        <tr key={t.id} style={{ background: i % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '6px 10px', color: '#64748b' }}>{fmtDate(t.createdAt)}</td>
-                          <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 10 }}>{t.reference}</td>
-                          <td style={{ padding: '6px 10px' }}>{t.narration}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(t.amount)}</td>
-                        </tr>
+              {statement.acctLoans.map((loan, lIdx) => {
+                const monthly = Number(loan.monthlyPayment || 0);
+                const tenure  = Number(loan.tenure || 0);
+                const principal = Number(loan.amount || 0);
+                const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : principal;
+                // Repayments that belong to THIS specific loan
+                const thisLoanTxns = (statement.loanTransactions || []).filter(t =>
+                  t.loan_id === loan.id || t.loanId === loan.id ||
+                  t.hp_agreement_id === loan.hpAgreementId || t.hpAgreementId === loan.hpAgreementId
+                );
+                const totalRepaid = thisLoanTxns.reduce((s, t) => s + Number(t.amount || 0), 0);
+
+                return (
+                  <div key={loan.id} style={{ marginBottom: lIdx < statement.acctLoans.length - 1 ? 24 : 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
+                    {/* Loan header */}
+                    <div style={{ background: loan.status === 'completed' ? '#f0fdf4' : loan.status === 'overdue' ? '#fef2f2' : '#fefce8', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fde68a' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: 18 }}>{loan.status === 'completed' ? '✅' : loan.status === 'overdue' ? '⚠️' : '📋'}</span>
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: 13, textTransform: 'capitalize' }}>{(loan.type || '').replace(/_/g, ' ')}{loan.itemName ? ` — ${loan.itemName}` : ''}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>Disbursed: {loan.disbursedAt ? new Date(loan.disbursedAt).toLocaleDateString() : '—'}</div>
+                        </div>
+                      </div>
+                      <span style={{ padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 800, background: loan.status === 'active' ? '#dcfce7' : loan.status === 'overdue' ? '#fee2e2' : loan.status === 'completed' ? '#d1fae5' : '#f1f5f9', color: loan.status === 'active' ? '#15803d' : loan.status === 'overdue' ? '#dc2626' : loan.status === 'completed' ? '#065f46' : '#64748b' }}>
+                        {(loan.status || '').toUpperCase()}
+                      </span>
+                    </div>
+
+                    {/* Loan figures */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 0, background: '#fff' }}>
+                      {[
+                        ['Principal',       GHS(principal),                                '#0f172a'],
+                        ['Rate',            `${loan.interestRate}%`,                       '#475569'],
+                        ['Monthly',         GHS(monthly),                                  '#1d4ed8'],
+                        ['Total Repayable', GHS(totalRepay),                               '#1d4ed8'],
+                        ['Total Repaid',    GHS(totalRepaid),                              '#16a34a'],
+                        ['Outstanding',     GHS(loan.outstanding),                         Number(loan.outstanding) > 0 ? '#dc2626' : '#16a34a'],
+                      ].map(([k, v, col], i) => (
+                        <div key={k} style={{ padding: '10px 14px', borderRight: i < 5 ? '1px solid #fde68a' : 'none', borderTop: '1px solid #fde68a' }}>
+                          <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>{k}</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: col }}>{v}</div>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                    </div>
+
+                    {/* This loan's repayments */}
+                    {thisLoanTxns.length > 0 && (
+                      <div style={{ borderTop: '1px solid #fde68a' }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', padding: '8px 14px', background: '#fef9c3' }}>
+                          Repayments ({thisLoanTxns.length}) — Total: {GHS(totalRepaid)}
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ background: '#f1f5f9' }}>
+                              {['Date', 'Reference', 'Description', 'Amount Paid'].map((h, i) => (
+                                <th key={h} style={{ padding: '6px 10px', textAlign: i === 3 ? 'right' : 'left', fontSize: 10, color: '#64748b', fontWeight: 700 }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {thisLoanTxns.map((t, i) => (
+                              <tr key={t.id} style={{ background: i % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '6px 10px', color: '#64748b' }}>{fmtDate(t.createdAt)}</td>
+                                <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 10 }}>{t.reference}</td>
+                                <td style={{ padding: '6px 10px' }}>{t.narration}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(t.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {thisLoanTxns.length === 0 && (
+                      <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8', borderTop: '1px solid #fde68a', background: '#fff' }}>
+                        No repayments in selected period
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
