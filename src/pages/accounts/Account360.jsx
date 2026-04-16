@@ -2,16 +2,20 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import Badge from '../../components/ui/Badge';
-import { Search, CreditCard, ArrowUpRight, ArrowDownRight, ShoppingBag, Plus } from 'lucide-react';
+import { Search, Plus, CreditCard, ArrowRightLeft, AlertTriangle, ShoppingBag } from 'lucide-react';
+import { authDB } from '../../core/db';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
 export default function Account360() {
-  const { accounts, customers, transactions, loans, hpAgreements, hpItems, deductionRules } = useApp();
+  const { accounts, customers, transactions, loans, hpAgreements, hpItems, deductionRules, postTransaction } = useApp();
   const navigate = useNavigate();
+  const user = authDB.currentUser();
   const [search, setSearch] = useState('');
   const [result, setResult] = useState(null);
   const [searched, setSearched] = useState(false);
+  const [offsetMsg, setOffsetMsg] = useState('');
+  const [offsetting, setOffsetting] = useState(null);
 
   const doSearch = () => {
     setSearched(true);
@@ -54,6 +58,41 @@ export default function Account360() {
     setResult({ acc, customer, allCustAccounts, custTxns, custLoans, custAgreements, custRules });
   };
 
+  // ── Apply account balance to offset a loan ────────────────────────────────
+  const doOffset = async (account, loan) => {
+    const balance = Number(account.balance || 0);
+    const outstanding = Number(loan.outstanding || 0);
+    if (balance <= 0) { setOffsetMsg('Account has no balance to apply.'); return; }
+    if (outstanding <= 0) { setOffsetMsg('Loan is already fully paid.'); return; }
+
+    const applyAmt = Math.min(balance, outstanding);
+    const confirm = window.confirm(
+      `Apply ${GHS(applyAmt)} from account ${account.accountNumber} to offset ${loan.type?.replace(/_/g,' ')} loan?\n\n` +
+      `Account balance: ${GHS(balance)}\nLoan outstanding: ${GHS(outstanding)}\nAmount to apply: ${GHS(applyAmt)}`
+    );
+    if (!confirm) return;
+
+    setOffsetting(loan.id);
+    setOffsetMsg('');
+    try {
+      const { error } = await postTransaction({
+        accountId: account.id,
+        account_id: account.id,
+        type: 'debit',
+        amount: applyAmt,
+        narration: `Loan offset — ${loan.type?.replace(/_/g,' ')} (from account balance)`,
+        channel: 'teller',
+        loan_id: loan.id,
+      });
+      if (error) { setOffsetMsg('Error: ' + error.message); }
+      else {
+        setOffsetMsg(`✅ ${GHS(applyAmt)} applied to loan. Outstanding reduced to ${GHS(Math.max(0, outstanding - applyAmt))}.`);
+        doSearch(); // refresh
+      }
+    } catch (e) { setOffsetMsg('Error: ' + e.message); }
+    setOffsetting(null);
+  };
+
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -81,6 +120,13 @@ export default function Account360() {
 
       {result && (
         <div className="fade-in">
+          {/* Offset message */}
+          {offsetMsg && (
+            <div className={`alert ${offsetMsg.startsWith('✅') ? 'alert-success' : 'alert-error'}`} style={{ marginBottom: 16 }}>
+              {offsetMsg}
+              <button onClick={() => setOffsetMsg('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+            </div>
+          )}
           {/* Customer header */}
           <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, #0f172a, #1e3a8a)', color: '#fff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -136,6 +182,26 @@ export default function Account360() {
                           {netPosition < 0 ? '-' : ''}{GHS(Math.abs(netPosition))}
                         </div>
                       </div>
+                      {/* ── Offset button ── */}
+                      {Number(a.balance) > 0 && linkedLoans.length > 0 && (
+                        <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>
+                            Apply balance to offset loan:
+                          </div>
+                          {linkedLoans.map(loan => (
+                            <button
+                              key={loan.id}
+                              className="btn btn-primary btn-sm"
+                              style={{ width: '100%', marginBottom: 4, fontSize: 11 }}
+                              disabled={offsetting === loan.id}
+                              onClick={() => doOffset(a, loan)}
+                            >
+                              <ArrowRightLeft size={12} />
+                              {offsetting === loan.id ? 'Applying…' : `Apply ${GHS(Math.min(Number(a.balance), Number(loan.outstanding)))} → ${loan.type?.replace(/_/g,' ')}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </>
                   )}
                   <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>{a.interestRate}% p.a.</div>
