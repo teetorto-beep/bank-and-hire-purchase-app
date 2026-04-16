@@ -110,7 +110,7 @@ export default function CreditScreen({ collector }) {
     } else if (type === 'hp') {
       const { data } = await supabase
         .from('hp_agreements')
-        .select('id, item_name, remaining, suggested_payment, payment_frequency')
+        .select('id, item_name, remaining, suggested_payment, payment_frequency, loan_id, total_paid, total_price')
         .eq('customer_id', selectedCustomer.id)
         .eq('status', 'active');
       setHpAgreements(data || []);
@@ -233,8 +233,26 @@ export default function CreditScreen({ collector }) {
             agreement_id: selectedHP.id, amount: amt, remaining,
             note: notes || 'Collection payment', collected_by: collector.name,
           });
-          if (agr.loan_id) {
-            const { data: loan } = await supabase.from('loans').select('outstanding, status').eq('id', agr.loan_id).single();
+
+          // Find linked loan — try loan_id first, then search by hp_agreement_id
+          let linkedLoanId = agr.loan_id;
+          if (!linkedLoanId) {
+            const { data: foundLoan } = await supabase
+              .from('loans')
+              .select('id')
+              .eq('hp_agreement_id', selectedHP.id)
+              .in('status', ['active', 'overdue'])
+              .limit(1)
+              .single();
+            linkedLoanId = foundLoan?.id || null;
+            // Also update the hp_agreement with the found loan_id for future payments
+            if (linkedLoanId) {
+              await supabase.from('hp_agreements').update({ loan_id: linkedLoanId }).eq('id', selectedHP.id);
+            }
+          }
+
+          if (linkedLoanId) {
+            const { data: loan } = await supabase.from('loans').select('outstanding, status').eq('id', linkedLoanId).single();
             if (loan) {
               const newOut = Math.max(0, Number(loan.outstanding) - amt);
               await supabase.from('loans').update({
@@ -242,7 +260,7 @@ export default function CreditScreen({ collector }) {
                 status: newOut <= 0 ? 'completed' : loan.status,
                 last_payment_date: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-              }).eq('id', agr.loan_id);
+              }).eq('id', linkedLoanId);
             }
           }
         }

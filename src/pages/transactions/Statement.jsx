@@ -94,18 +94,27 @@ export default function Statement() {
       });
 
       // Separate savings txns from loan/HP repayments
-      // Loan/HP repayments do NOT affect account balance — show separately under each loan
-      // NOTE: collector savings deposits (credit, channel=collection) DO affect balance
-      const isLoanTxn = (t) =>
+      // Rules:
+      // - Collector DEBIT (channel=collection): loan/HP cash payment — does NOT affect account balance
+      // - Loan offset (narration=loan offset, channel=teller): DOES affect account balance AND reduces loan
+      // - HP/Loan repayment via teller (loanId/hpId set, channel=teller): DOES affect account balance
+      // - Savings deposits (credit): always in main list
+      const isCollectorCashPayment = (t) =>
+        t.type === 'debit' && t.channel === 'collection';
+
+      const isLoanTxn = (t) => isCollectorCashPayment(t); // only collector cash doesn't affect balance
+
+      // Loan transactions for the loan section = collector cash + teller loan payments + offsets
+      const isLoanRelated = (t) =>
+        isCollectorCashPayment(t) ||
         (t.narration || '').toLowerCase().includes('loan repayment') ||
         (t.narration || '').toLowerCase().includes('hp repayment') ||
         (t.narration || '').toLowerCase().includes('loan offset') ||
         !!(t.loanId || t.loan_id) ||
-        !!(t.hpAgreementId || t.hp_agreement_id) ||
-        (t.type === 'debit' && t.channel === 'collection'); // only DEBIT collections are loan/HP payments
+        !!(t.hpAgreementId || t.hp_agreement_id);
 
       const savingsTxns = periodTxns.filter(t => !isLoanTxn(t));
-      const loanTxns    = periodTxns.filter(t =>  isLoanTxn(t));
+      const loanTxns    = periodTxns.filter(t =>  isLoanRelated(t));
 
       // ── Compute opening balance reliably ──────────────────────────────────
       // Work backwards from current account balance using ALL transactions

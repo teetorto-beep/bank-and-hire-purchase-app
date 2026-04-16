@@ -121,11 +121,19 @@ async function replayOperation(op) {
           const remaining = Math.max(0, Number(agr.total_price) - newPaid);
           await supabase.from("hp_agreements").update({ total_paid: newPaid, remaining, status: remaining <= 0 ? "completed" : "active", last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", hpAgreementId);
           await supabase.from("hp_payments").insert({ agreement_id: hpAgreementId, amount: Number(amount), remaining, note: notes || "Collection payment", collected_by: collectorName });
-          if (agr.loan_id) {
-            const { data: hpLoan } = await supabase.from("loans").select("outstanding, status").eq("id", agr.loan_id).single();
+
+          // Find linked loan — try loan_id first, then search by hp_agreement_id
+          let linkedLoanId = agr.loan_id;
+          if (!linkedLoanId) {
+            const { data: foundLoan } = await supabase.from("loans").select("id").eq("hp_agreement_id", hpAgreementId).in("status", ["active", "overdue"]).limit(1).single();
+            linkedLoanId = foundLoan?.id || null;
+            if (linkedLoanId) await supabase.from("hp_agreements").update({ loan_id: linkedLoanId }).eq("id", hpAgreementId);
+          }
+          if (linkedLoanId) {
+            const { data: hpLoan } = await supabase.from("loans").select("outstanding, status").eq("id", linkedLoanId).single();
             if (hpLoan) {
               const newOut = Math.max(0, Number(hpLoan.outstanding) - Number(amount));
-              await supabase.from("loans").update({ outstanding: newOut, status: newOut <= 0 ? "completed" : hpLoan.status, last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", agr.loan_id);
+              await supabase.from("loans").update({ outstanding: newOut, status: newOut <= 0 ? "completed" : hpLoan.status, last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", linkedLoanId);
             }
           }
         }
