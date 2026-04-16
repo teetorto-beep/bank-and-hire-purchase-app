@@ -145,10 +145,16 @@ export default function PostTransaction() {
     } else if (mode === 'gl') {
       if (!form.glCode.trim()) { setError('Enter a GL account code.'); return; }
     } else {
-      if (!finalNarr.trim()) { setError('Enter a narration.'); return; }
+      if (!finalNarr.trim() && mode !== 'loan' && mode !== 'hp') { setError('Enter a narration.'); return; }
       if (mode === 'loan' && !form.linkedId) { setError('Select a loan.'); return; }
       if (mode === 'hp'   && !form.linkedId) { setError('Select an HP agreement.'); return; }
-      if (form.type === 'debit' && balance < amount) { setError(`Insufficient balance. Available: ${GHS(balance)}`); return; }
+      // For loan/HP: always debit from account — check balance
+      if ((mode === 'loan' || mode === 'hp') && balance < amount) {
+        setError(`Insufficient balance. Account has ${GHS(balance)}, payment is ${GHS(amount)}.`); return;
+      }
+      if (mode === 'regular' && form.type === 'debit' && balance < amount) {
+        setError(`Insufficient balance. Available: ${GHS(balance)}`); return;
+      }
     }
 
     setSaving(true); setError('');
@@ -465,14 +471,68 @@ export default function PostTransaction() {
                 <label className="form-label">Select Loan <span className="required">*</span></label>
                 {activeLoans.length === 0
                   ? <div className="alert alert-warning"><AlertCircle size={13} /> No active loans for this customer.</div>
-                  : <select className="form-control" value={form.linkedId} onChange={e => handleLinkedId(e.target.value)}>
-                      <option value="">— Choose a loan —</option>
-                      {activeLoans.map(l => (
-                        <option key={l.id} value={l.id}>
-                          {l.purpose || l.type} · Outstanding: {GHS(l.outstanding)} · Monthly: {GHS(l.monthlyPayment)}
-                        </option>
-                      ))}
-                    </select>}
+                  : <>
+                      <select className="form-control" value={form.linkedId} onChange={e => handleLinkedId(e.target.value)}>
+                        <option value="">— Choose a loan —</option>
+                        {activeLoans.map(l => (
+                          <option key={l.id} value={l.id}>
+                            {l.purpose || (l.type||'').replace(/_/g,' ')} · Outstanding: {GHS(l.outstanding)} · Monthly: {GHS(l.monthlyPayment)}
+                          </option>
+                        ))}
+                      </select>
+                      {/* Loan + account context card */}
+                      {form.linkedId && (() => {
+                        const loan = activeLoans.find(l => l.id === form.linkedId);
+                        if (!loan) return null;
+                        const monthly = Number(loan.monthlyPayment || 0);
+                        const outstanding = Number(loan.outstanding || 0);
+                        const maxPayable = Math.min(balance, outstanding);
+                        return (
+                          <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                            {/* Balance vs outstanding */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+                              {[
+                                ['Account Balance', GHS(balance), balance > 0 ? 'var(--green)' : 'var(--red)'],
+                                ['Loan Outstanding', GHS(outstanding), outstanding > 0 ? 'var(--red)' : 'var(--green)'],
+                                ['Max Payable', GHS(maxPayable), 'var(--brand)'],
+                              ].map(([l, v, c]) => (
+                                <div key={l} style={{ padding: '10px 14px', borderRight: '1px solid var(--border)' }}>
+                                  <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>{l}</div>
+                                  <div style={{ fontSize: 15, fontWeight: 800, color: c }}>{v}</div>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Quick-fill buttons */}
+                            <div style={{ padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>Quick fill:</span>
+                              {monthly > 0 && monthly <= balance && (
+                                <button type="button" className="btn btn-secondary btn-sm"
+                                  onClick={() => setForm(p => ({ ...p, amount: String(monthly) }))}>
+                                  Monthly {GHS(monthly)}
+                                </button>
+                              )}
+                              {maxPayable > 0 && maxPayable !== monthly && (
+                                <button type="button" className="btn btn-secondary btn-sm"
+                                  onClick={() => setForm(p => ({ ...p, amount: String(maxPayable) }))}>
+                                  Max payable {GHS(maxPayable)}
+                                </button>
+                              )}
+                              {outstanding > 0 && outstanding <= balance && outstanding !== monthly && (
+                                <button type="button" className="btn btn-primary btn-sm"
+                                  onClick={() => setForm(p => ({ ...p, amount: String(outstanding) }))}>
+                                  Full outstanding {GHS(outstanding)}
+                                </button>
+                              )}
+                            </div>
+                            {balance < monthly && (
+                              <div style={{ padding: '8px 14px', background: 'var(--yellow-bg)', fontSize: 12, color: '#92400e', borderTop: '1px solid var(--border)' }}>
+                                ⚠️ Account balance ({GHS(balance)}) is less than the monthly payment ({GHS(monthly)}). You can still make a partial payment.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </>}
               </div>
             )}
 
@@ -482,14 +542,66 @@ export default function PostTransaction() {
                 <label className="form-label">Select HP Agreement <span className="required">*</span></label>
                 {activeHP.length === 0
                   ? <div className="alert alert-warning"><AlertCircle size={13} /> No active HP agreements for this customer.</div>
-                  : <select className="form-control" value={form.linkedId} onChange={e => handleLinkedId(e.target.value)}>
-                      <option value="">— Choose an agreement —</option>
-                      {activeHP.map(a => (
-                        <option key={a.id} value={a.id}>
-                          {a.itemName || a.item_name} · Remaining: {GHS(a.remaining)} · Suggested: {GHS(a.suggestedPayment)}
-                        </option>
-                      ))}
-                    </select>}
+                  : <>
+                      <select className="form-control" value={form.linkedId} onChange={e => handleLinkedId(e.target.value)}>
+                        <option value="">— Choose an agreement —</option>
+                        {activeHP.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.itemName || a.item_name} · Remaining: {GHS(a.remaining)} · Suggested: {GHS(a.suggestedPayment)}
+                          </option>
+                        ))}
+                      </select>
+                      {/* HP + account context card */}
+                      {form.linkedId && (() => {
+                        const agr = activeHP.find(a => a.id === form.linkedId);
+                        if (!agr) return null;
+                        const suggested = Number(agr.suggestedPayment || 0);
+                        const remaining = Number(agr.remaining || 0);
+                        const maxPayable = Math.min(balance, remaining);
+                        return (
+                          <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+                              {[
+                                ['Account Balance', GHS(balance),   balance > 0 ? 'var(--green)' : 'var(--red)'],
+                                ['HP Remaining',    GHS(remaining),  remaining > 0 ? 'var(--red)' : 'var(--green)'],
+                                ['Max Payable',     GHS(maxPayable), 'var(--brand)'],
+                              ].map(([l, v, c]) => (
+                                <div key={l} style={{ padding: '10px 14px', borderRight: '1px solid var(--border)' }}>
+                                  <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>{l}</div>
+                                  <div style={{ fontSize: 15, fontWeight: 800, color: c }}>{v}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>Quick fill:</span>
+                              {suggested > 0 && suggested <= balance && (
+                                <button type="button" className="btn btn-secondary btn-sm"
+                                  onClick={() => setForm(p => ({ ...p, amount: String(suggested) }))}>
+                                  Suggested {GHS(suggested)}
+                                </button>
+                              )}
+                              {maxPayable > 0 && maxPayable !== suggested && (
+                                <button type="button" className="btn btn-secondary btn-sm"
+                                  onClick={() => setForm(p => ({ ...p, amount: String(maxPayable) }))}>
+                                  Max payable {GHS(maxPayable)}
+                                </button>
+                              )}
+                              {remaining > 0 && remaining <= balance && remaining !== suggested && (
+                                <button type="button" className="btn btn-primary btn-sm"
+                                  onClick={() => setForm(p => ({ ...p, amount: String(remaining) }))}>
+                                  Full remaining {GHS(remaining)}
+                                </button>
+                              )}
+                            </div>
+                            {balance < suggested && (
+                              <div style={{ padding: '8px 14px', background: 'var(--yellow-bg)', fontSize: 12, color: '#92400e', borderTop: '1px solid var(--border)' }}>
+                                ⚠️ Balance ({GHS(balance)}) is less than suggested ({GHS(suggested)}). You can still make a partial payment.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </>}
               </div>
             )}
 
@@ -519,7 +631,30 @@ export default function PostTransaction() {
               <input className="form-control" type="number" min="0.01" step="0.01"
                 value={form.amount} onChange={f('amount')} placeholder="0.00"
                 style={{ fontSize: 22, fontWeight: 800, textAlign: 'center' }} />
-              {mode !== 'transfer' && mode !== 'gl' && form.type === 'debit' && amount > 0 && (
+              {/* Loan/HP mode: show both account balance after AND loan outstanding after */}
+              {(mode === 'loan' || mode === 'hp') && amount > 0 && form.linkedId && (() => {
+                const linked = mode === 'loan'
+                  ? activeLoans.find(l => l.id === form.linkedId)
+                  : activeHP.find(a => a.id === form.linkedId);
+                const outstanding = Number(linked?.outstanding ?? linked?.remaining ?? 0);
+                const balAfter = balance - amount;
+                const outAfter = Math.max(0, outstanding - amount);
+                return (
+                  <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: balAfter < 0 ? 'var(--red-bg)' : 'var(--green-bg)', border: `1px solid ${balAfter < 0 ? 'var(--red)' : 'var(--green)'}` }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: balAfter < 0 ? 'var(--red)' : 'var(--green)', textTransform: 'uppercase', marginBottom: 2 }}>Account Balance After</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: balAfter < 0 ? 'var(--red)' : 'var(--green)' }}>{GHS(balAfter)}</div>
+                      {balAfter < 0 && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>Insufficient funds</div>}
+                    </div>
+                    <div style={{ padding: '8px 12px', borderRadius: 8, background: outAfter <= 0 ? 'var(--green-bg)' : 'var(--yellow-bg)', border: `1px solid ${outAfter <= 0 ? 'var(--green)' : 'var(--yellow)'}` }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: outAfter <= 0 ? 'var(--green)' : 'var(--yellow)', textTransform: 'uppercase', marginBottom: 2 }}>{mode === 'hp' ? 'HP Remaining After' : 'Loan Outstanding After'}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: outAfter <= 0 ? 'var(--green)' : '#92400e' }}>{GHS(outAfter)}</div>
+                      {outAfter <= 0 && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>Fully paid off ✓</div>}
+                    </div>
+                  </div>
+                );
+              })()}
+              {mode === 'regular' && form.type === 'debit' && amount > 0 && (
                 <div className="form-hint" style={{ color: amount > balance ? 'var(--red)' : 'var(--text-3)' }}>
                   Balance after: {GHS(balance - amount)}{amount > balance ? ' — Insufficient funds' : ''}
                 </div>
