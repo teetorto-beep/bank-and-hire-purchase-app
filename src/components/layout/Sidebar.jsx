@@ -109,7 +109,7 @@ function canAccess(user, moduleLabel) {
   return perms.includes(mod);
 }
 
-export default function Sidebar({ user, onLogout }) {
+export default function Sidebar({ user, onLogout, mobileOpen, onClose }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState({});
@@ -120,12 +120,12 @@ export default function Sidebar({ user, onLogout }) {
   const toggle = (label) => setOpen(p => ({ ...p, [label]: !p[label] }));
 
   const handleLogout = () => { authDB.logout(); onLogout(); };
+  const handleNav = (path) => { navigate(path); onClose?.(); };
 
-  // Pending approvals count for badge — reads from sessionStorage cache set by AppContext
-  const pendingCount = 0; // Will be driven by AppContext in child components
+  const pendingCount = 0;
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>
       <div className="sidebar-logo">
         <div className="logo-mark">
           <div className="logo-icon">M</div>
@@ -143,7 +143,7 @@ export default function Sidebar({ user, onLogout }) {
               <div key={item.path} className="nav-section">
                 <a
                   className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
-                  onClick={() => navigate(item.path)}
+                  onClick={() => handleNav(item.path)}
                 >
                   <item.icon size={16} />
                   {item.label}
@@ -167,7 +167,7 @@ export default function Sidebar({ user, onLogout }) {
                     <a
                       key={child.path}
                       className={`nav-item ${isActive(child.path) ? 'active' : ''}`}
-                      onClick={() => navigate(child.path)}
+                      onClick={() => handleNav(child.path)}
                     >
                       <child.icon size={14} />
                       {child.label}

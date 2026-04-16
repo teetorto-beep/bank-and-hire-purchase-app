@@ -46,13 +46,18 @@ function AppShell({ user, onLogout }) {
 
 function AppContent({ user, onLogout }) {
   const { lastRefresh } = useApp();
-  
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
+
   return (
     <>
       <div className="app-shell">
-        <Sidebar user={user} onLogout={onLogout} />
+        {/* Mobile overlay backdrop */}
+        {sidebarOpen && (
+          <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+        )}
+        <Sidebar user={user} onLogout={onLogout} mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="main-area">
-          <TopBar user={user} />
+          <TopBar user={user} onMenuClick={() => setSidebarOpen(p => !p)} />
           <main className="page-content">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />

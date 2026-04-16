@@ -21,7 +21,7 @@
         "backgroundColor": "#0a0f1e"
       },
       "package": "com.majupat.customer",
-      "versionCode": 3,
+      "versionCode": 4,
       "minSdkVersion": 24,
       "permissions": [
         "android.permission.INTERNET",

@@ -137,6 +137,26 @@ export default function UserManagement() {
         </div>
       </div>
 
+      {/* Stats */}
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
+        {[
+          { label: 'Total Users',   value: users.length,                                          color: 'var(--brand)',  bg: 'var(--blue-bg)' },
+          { label: 'Active',        value: users.filter(u => u.status !== 'inactive').length,     color: 'var(--green)',  bg: 'var(--green-bg)' },
+          { label: 'Inactive',      value: users.filter(u => u.status === 'inactive').length,     color: 'var(--red)',    bg: 'var(--red-bg)' },
+          { label: 'Custom Perms',  value: users.filter(u => hasCustomPerms(u)).length,           color: '#7c3aed',       bg: 'var(--purple-bg)' },
+        ].map(s => (
+          <div key={s.label} className="stat-card" style={{ borderTop: `3px solid ${s.color}` }}>
+            <div className="stat-info">
+              <div className="stat-label">{s.label}</div>
+              <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+            </div>
+            <div className="stat-icon" style={{ background: s.bg }}>
+              <Shield size={20} style={{ color: s.color }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Role legend */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {ROLES.map(r => (

@@ -45,6 +45,26 @@ export default function PendingApprovals() {
         </div>
       </div>
 
+      {/* Stats bar */}
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
+        {[
+          { label: 'Pending',  value: pending.length,                                                    color: '#d97706', bg: 'var(--yellow-bg)' },
+          { label: 'Approved', value: processed.filter(p => p.status === 'approved').length,             color: 'var(--green)', bg: 'var(--green-bg)' },
+          { label: 'Rejected', value: processed.filter(p => p.status === 'rejected').length,             color: 'var(--red)',   bg: 'var(--red-bg)' },
+          { label: 'Total',    value: (pendingApprovals || []).length,                                    color: 'var(--brand)', bg: 'var(--blue-bg)' },
+        ].map(s => (
+          <div key={s.label} className="stat-card" style={{ borderTop: `3px solid ${s.color}` }}>
+            <div className="stat-info">
+              <div className="stat-label">{s.label}</div>
+              <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+            </div>
+            <div className="stat-icon" style={{ background: s.bg }}>
+              <CheckCircle size={20} style={{ color: s.color }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
       {error && <div className="alert alert-error" style={{ marginBottom: 16 }}><XCircle size={14} />{error}<button onClick={() => setError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button></div>}
 
       {!isAdmin && (

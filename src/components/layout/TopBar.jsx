@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Bell, X, CheckCheck, ArrowUpRight, ArrowDownRight, CreditCard, ShoppingBag, Users, AlertCircle } from 'lucide-react';
+import { Bell, X, CheckCheck, ArrowUpRight, ArrowDownRight, CreditCard, ShoppingBag, Users, AlertCircle, Menu } from 'lucide-react';
 import { supabase } from '../../core/supabase';
 import { notificationsDB } from '../../core/db';
 
@@ -88,7 +88,7 @@ function Toast({ toasts, onDismiss }) {
   );
 }
 
-export default function TopBar({ user }) {
+export default function TopBar({ user, onMenuClick }) {
   const location = useLocation();
   const title = TITLES[location.pathname] || 'Majupat Love Enterprise';
 
@@ -243,6 +243,9 @@ export default function TopBar({ user }) {
 
       <header className="topbar">
         <div className="topbar-left">
+          <button className="topbar-menu-btn" onClick={onMenuClick} aria-label="Open menu">
+            <Menu size={22} />
+          </button>
           <span className="topbar-title">{title}</span>
         </div>
         <div className="topbar-right">
@@ -271,7 +274,7 @@ export default function TopBar({ user }) {
             </button>
 
             {open && (
-              <div style={{
+              <div className="notif-dropdown" style={{
                 position: 'absolute', top: 'calc(100% + 8px)', right: 0,
                 width: 360, background: 'var(--surface)',
                 border: '1px solid var(--border)', borderRadius: 12,
@@ -337,7 +340,7 @@ export default function TopBar({ user }) {
             <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 13, fontWeight: 700 }}>
               {user?.name?.[0]?.toUpperCase()}
             </div>
-            <div>
+            <div className="topbar-user-name">
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{user?.name}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'capitalize' }}>{user?.role}</div>
             </div>
