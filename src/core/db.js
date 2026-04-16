@@ -309,15 +309,17 @@ export const transactionsDB = {
 
     const loanId = payload.loan_id || payload.loanId;
     const hpId   = payload.hp_agreement_id || payload.hpAgreementId;
-    // Loan/HP repayments do NOT touch account balance — they only reduce loan outstanding
-    const isLoanRepayment = !!(loanId || hpId) && type === 'debit';
+    // Loan/HP repayments via COLLECTOR (cash collected in field) do NOT touch account balance.
+    // But teller/offset payments DO deduct from the account balance.
+    const isCollectorCash = !!(loanId || hpId) && type === 'debit' && channel === 'collection';
+    const isLoanRepayment = isCollectorCash; // only skip balance for collector cash
 
-    // Balance check for debits (skip for loan/HP repayments — cash paid directly to collector)
+    // Balance check for debits (skip for collector cash — cash paid directly to collector)
     if (type === 'debit' && !isLoanRepayment && account.balance < amount) {
       return { data: null, error: new Error('Insufficient balance') };
     }
 
-    // Account balance only changes for non-loan transactions
+    // Account balance changes for all transactions EXCEPT collector cash payments
     const balanceAfter = isLoanRepayment
       ? Number(account.balance)
       : type === 'credit'
