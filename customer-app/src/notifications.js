@@ -77,13 +77,18 @@ export async function showLocalNotification(title, body, data = {}) {
 // ── Subscribe to Supabase realtime → fire OS notification ────────────────────
 export function subscribeToNotifications(customerId, onNew) {
   const channel = supabase
-    .channel(`cust-notifs-${customerId}`)
+    .channel(`cust-notifs-${customerId}-${Date.now()}`)
     .on(
       "postgres_changes",
-      { event: "INSERT", schema: "public", table: "notifications" },
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${customerId}`,
+      },
       (payload) => {
         const n = payload.new;
-        if (!n || n.user_id !== customerId) return;
+        if (!n) return;
         showLocalNotification(n.title, n.message, { notificationId: n.id });
         onNew?.(n);
       }
@@ -149,6 +154,18 @@ export async function checkAndNotifyLoansDue(customerId) {
 
   const today    = new Date(); today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const todayStr = today.toISOString().slice(0, 10);
+
+  // Check if we already sent a due-alert today to avoid duplicates
+  const { data: existing } = await supabase
+    .from("notifications")
+    .select("id")
+    .eq("user_id", customerId)
+    .gte("created_at", today.toISOString())
+    .ilike("title", "%Loan Payment%")
+    .limit(1);
+
+  if (existing && existing.length > 0) return; // already notified today
 
   for (const loan of loans) {
     const name = (loan.type || "Loan").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -156,7 +173,7 @@ export async function checkAndNotifyLoansDue(customerId) {
 
     if (loan.status === "overdue") {
       await sendNotification(customerId, "⚠️ Overdue Loan Payment",
-        `Your ${name} payment of ${amt} is overdue. Please pay immediately.`, "error");
+        `Your ${name} payment of ${amt} is overdue. Please pay immediately to avoid penalties.`, "error");
       continue;
     }
     if (!loan.next_due_date) continue;

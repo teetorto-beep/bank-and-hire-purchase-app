@@ -146,19 +146,27 @@ function MainApp({ customer, onLogout }) {
       .then(({ data }) => { if (data) setAccounts(data); });
   }, [customer.id]);
 
-  // Initial unread count
+  // Initial unread count + loan due alerts + realtime subscription
   useEffect(() => {
+    // Load unread count
     supabase
       .from("notifications")
       .select("id", { count: "exact", head: true })
       .eq("user_id", customer.id)
       .eq("read", false)
       .then(({ count }) => setUnread(count || 0));
+
+    // Check for loan due alerts (inserts notification rows)
     checkAndNotifyLoansDue(customer.id);
+
     // Register for OS push notifications
     registerPushToken(customer.id);
-    // Subscribe: new notification row → fire OS status-bar notification
-    const unsub = subscribeToNotifications(customer.id, () => setUnread(p => p + 1));
+
+    // Subscribe: new notification row → bump unread badge
+    const unsub = subscribeToNotifications(customer.id, (n) => {
+      setUnread(p => p + 1);
+    });
+
     return () => unsub();
   }, [customer.id]);
 

@@ -14,28 +14,52 @@ export default function NotificationsScreen({ customer, onRead }) {
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (refresh=false) => {
+  const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true); else setLoading(true);
-    const { data } = await supabase.from("notifications")
-      .select("*").eq("user_id", customer.id)
-      .order("created_at",{ascending:false}).limit(60);
-    setNotifs(data || []);
+    try {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", customer.id)
+        .order("created_at", { ascending: false })
+        .limit(60);
+      if (!error) setNotifs(data || []);
+    } catch (_) {}
     if (refresh) setRefreshing(false); else setLoading(false);
   }, [customer.id]);
 
-  useEffect(() => {
-    load();
-    supabase.from("notifications").update({read:true}).eq("user_id",customer.id).eq("read",false);
-    onRead?.();
-  }, []);
+  // Load on mount
+  useEffect(() => { load(); }, [load]);
 
+  // Mark all unread as read after a short delay (so badge updates first)
   useEffect(() => {
-    const ch = supabase.channel(`notif-screen-${customer.id}`)
-      .on("postgres_changes",{event:"INSERT",schema:"public",table:"notifications",filter:`user_id=eq.${customer.id}`},
-        payload => {
-          setNotifs(p => [payload.new, ...p]);
-          supabase.from("notifications").update({read:true}).eq("id",payload.new.id);
-        })
+    const t = setTimeout(async () => {
+      await supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("user_id", customer.id)
+        .eq("read", false);
+      onRead?.();
+      setNotifs(p => p.map(n => ({ ...n, read: true })));
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [customer.id]);
+
+  // Realtime: new notification arrives while screen is open
+  useEffect(() => {
+    const ch = supabase
+      .channel(`notif-screen-${customer.id}-${Date.now()}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "notifications",
+        filter: `user_id=eq.${customer.id}`,
+      }, payload => {
+        if (!payload.new) return;
+        setNotifs(p => [payload.new, ...p]);
+        // Mark it read after a moment since screen is open
+        setTimeout(() => {
+          supabase.from("notifications").update({ read: true }).eq("id", payload.new.id);
+        }, 1500);
+      })
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [customer.id]);
