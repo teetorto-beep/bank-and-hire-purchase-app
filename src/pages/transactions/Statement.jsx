@@ -95,30 +95,46 @@ export default function Statement() {
 
       // Separate savings txns from loan/HP repayments
       // Loan/HP repayments do NOT affect account balance — show separately under each loan
+      // NOTE: collector savings deposits (credit, channel=collection) DO affect balance
       const isLoanTxn = (t) =>
         (t.narration || '').toLowerCase().includes('loan repayment') ||
         (t.narration || '').toLowerCase().includes('hp repayment') ||
         (t.narration || '').toLowerCase().includes('loan offset') ||
         !!(t.loanId || t.loan_id) ||
         !!(t.hpAgreementId || t.hp_agreement_id) ||
-        (t.type === 'debit' && t.channel === 'collection');
+        (t.type === 'debit' && t.channel === 'collection'); // only DEBIT collections are loan/HP payments
 
       const savingsTxns = periodTxns.filter(t => !isLoanTxn(t));
       const loanTxns    = periodTxns.filter(t =>  isLoanTxn(t));
 
-      let openingBalance = 0;
-      if (savingsTxns.length > 0) {
-        const first = savingsTxns[0];
-        openingBalance = first.type === 'credit'
-          ? first.balanceAfter - first.amount
-          : first.balanceAfter + first.amount;
-      } else {
-        openingBalance = selectedAccount.balance;
+      // ── Compute opening balance reliably ──────────────────────────────────
+      // Work backwards from current account balance using ALL transactions
+      // after the period end — this avoids relying on stored balance_after
+      // which may be stale/wrong from old transactions.
+      const currentBalance = Number(selectedAccount.balance || 0);
+      const txnsAfterPeriod = acctTxns.filter(t => {
+        if (!to) return false;
+        return new Date(t.createdAt) > to;
+      });
+      // Reverse the effect of transactions after the period to get closing balance
+      let closingBalance = currentBalance;
+      for (const t of txnsAfterPeriod) {
+        if (isLoanTxn(t)) continue; // loan txns don't affect account balance
+        if (t.type === 'credit') closingBalance -= t.amount;
+        else closingBalance += t.amount;
       }
 
       const totalCredits = savingsTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
       const totalDebits  = savingsTxns.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
-      const closingBalance = openingBalance + totalCredits - totalDebits;
+      const openingBalance = closingBalance - totalCredits + totalDebits;
+
+      // Recompute running balance for each savings transaction
+      let runningBal = openingBalance;
+      const savingsTxnsWithBal = savingsTxns.map(t => {
+        if (t.type === 'credit') runningBal += t.amount;
+        else runningBal -= t.amount;
+        return { ...t, computedBalance: runningBal };
+      });
 
       const acctLoans = loans.filter(l =>
         l.accountId === selectedAccount.id || l.account_id === selectedAccount.id
@@ -133,7 +149,7 @@ export default function Statement() {
         customer: selectedCustomer,
         dateFrom, dateTo,
         generatedAt: new Date().toISOString(),
-        transactions: savingsTxns,
+        transactions: savingsTxnsWithBal,
         loanTransactions: loanTxns,
         acctLoans,
         acctHP,
@@ -240,7 +256,7 @@ tr:nth-child(even) { background:#f8fafc; }
         <td>${t.narration||'\u2014'}${t.reversed?'<span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;margin-left:4px">REVERSED</span>':''}</td>
         <td style="text-align:right;color:#dc2626;font-weight:700">${t.type==='debit'?Number(t.amount).toLocaleString('en-GH',{minimumFractionDigits:2}):''}</td>
         <td style="text-align:right;color:#16a34a;font-weight:700">${t.type==='credit'?Number(t.amount).toLocaleString('en-GH',{minimumFractionDigits:2}):''}</td>
-        <td style="text-align:right;font-weight:600">${Number(t.balanceAfter||0).toLocaleString('en-GH',{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;font-weight:600">${Number(t.computedBalance ?? t.balanceAfter ?? 0).toLocaleString('en-GH',{minimumFractionDigits:2})}</td>
       </tr>`).join('')}
   </tbody>
   <tfoot><tr class="tfoot-row">
@@ -279,7 +295,7 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
       Narration: t.narration + (t.reversed ? ' [REVERSED]' : ''),
       Debit: t.type === 'debit' ? t.amount : '',
       Credit: t.type === 'credit' ? t.amount : '',
-      Balance: t.balanceAfter,
+      Balance: t.computedBalance ?? t.balanceAfter,
     }));
     exportCSV(rows, `statement-${statement.account.accountNumber}`);
   };
@@ -466,7 +482,7 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                       {t.type === 'credit' ? Number(t.amount).toLocaleString('en-GH', { minimumFractionDigits: 2 }) : ''}
                     </td>
                     <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {Number(t.balanceAfter || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
+                      {Number(t.computedBalance ?? t.balanceAfter ?? 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
                     </td>
                   </tr>
                 ))}

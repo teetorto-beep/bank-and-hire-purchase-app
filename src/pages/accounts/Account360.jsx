@@ -143,14 +143,23 @@ export default function Account360() {
       accountId: l.account_id, customerId: l.customer_id,
       itemName: l.item_name,
     }));
-    const custTxns = (txnsRes.data || []).map(t => ({
-      ...t,
-      id: t.id, amount: Number(t.amount || 0),
+    // Build transactions with recomputed running balance
+    const rawTxns = (txnsRes.data || []).map(t => ({
+      ...t, id: t.id, amount: Number(t.amount || 0),
       type: t.type, narration: t.narration,
       createdAt: t.created_at, balanceAfter: Number(t.balance_after || 0),
-      posterName: t.poster_name,
-      accountId: t.account_id,
+      posterName: t.poster_name, accountId: t.account_id,
     }));
+    const isLoanT = (t) => !!(t.loan_id) || !!(t.hp_agreement_id) || (t.type === 'debit' && t.channel === 'collection');
+    const accBal = Number(accData.balance || 0);
+    const sortedAsc = [...rawTxns].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    let runBal = accBal;
+    const balMap = {};
+    for (const t of [...sortedAsc].reverse()) {
+      balMap[t.id] = runBal;
+      if (!isLoanT(t)) { if (t.type === 'credit') runBal -= t.amount; else runBal += t.amount; }
+    }
+    const custTxns = rawTxns.map(t => ({ ...t, computedBalance: isLoanT(t) ? null : balMap[t.id] }));
     const custAgreements = (hpRes.data || []).map(a => ({
       ...a,
       id: a.id, totalPaid: Number(a.total_paid || 0),
@@ -405,7 +414,7 @@ export default function Account360() {
                         <td style={{ fontWeight: 700, color: t.type === 'credit' ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap' }}>
                           {t.type === 'credit' ? '+' : '-'}{GHS(t.amount)}
                         </td>
-                        <td>{GHS(t.balanceAfter)}</td>
+                        <td>{t.computedBalance !== null && t.computedBalance !== undefined ? GHS(t.computedBalance) : '—'}</td>
                         <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{t.posterName || '—'}</td>
                       </tr>
                     );
