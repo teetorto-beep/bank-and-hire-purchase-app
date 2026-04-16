@@ -221,7 +221,6 @@ export default function Settings() {
                     ['Application',  'Majupat Love Enterprise',          'var(--brand)'],
                     ['Developer',    'Maxbraynn Technology & Systems',    null],
                     ['Version',      'v2.0.0',                           'var(--green)'],
-                    ['Database',     'Supabase (PostgreSQL)',             null],
                     ['Environment',  'Production',                       'var(--green)'],
                     ['Build',        new Date().getFullYear() + ' Release', null],
                   ].map(([k, v, color]) => (
