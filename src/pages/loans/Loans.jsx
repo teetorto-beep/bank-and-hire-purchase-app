@@ -336,11 +336,21 @@ export default function Loans() {
               </button>
             </>
           )}
-          {(l.status === 'active' || l.status === 'overdue') && (
-            <button className="btn btn-primary btn-sm btn-icon" title="Record Repayment" onClick={() => { setRepayAmount(''); setError(''); setRepayModal(l); }}>
-              <DollarSign size={13} />
-            </button>
-          )}
+          {(l.status === 'active' || l.status === 'overdue') && (() => {
+              const accBal = Number(l.account?.balance ?? 0);
+              const noFunds = accBal <= 0;
+              return (
+                <button
+                  className="btn btn-primary btn-sm btn-icon"
+                  title={noFunds ? `No funds — account balance is ${GHS(accBal)}` : 'Record Repayment'}
+                  disabled={noFunds}
+                  style={noFunds ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+                  onClick={() => { if (!noFunds) { setRepayAmount(''); setError(''); setRepayModal(l); } }}
+                >
+                  <DollarSign size={13} />
+                </button>
+              );
+            })()}
           {isAdmin && (
             <>
               <button className="btn btn-ghost btn-sm btn-icon" title="Edit" onClick={() => openEdit(l)}>

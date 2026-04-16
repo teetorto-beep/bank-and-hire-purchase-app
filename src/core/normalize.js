@@ -73,6 +73,9 @@ export const normTransaction = (t) => !t ? null : {
   reversalOf: t.reversal_of || t.reversalOf || null,
   createdAt: t.created_at || t.createdAt || '',
   status: t.status || 'completed',
+  // Loan / HP links — needed for statement separation
+  loanId: t.loan_id || t.loanId || null,
+  hpAgreementId: t.hp_agreement_id || t.hpAgreementId || null,
   // Supabase join
   accountNumber: t.accounts?.account_number || t.accountNumber || '',
   customerName: t.accounts?.customers?.name || t.customerName || '—',

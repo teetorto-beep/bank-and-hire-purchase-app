@@ -94,11 +94,14 @@ export default function Statement() {
       });
 
       // Separate savings txns from loan/HP repayments
-      // Loan repayments do NOT affect account balance — show separately
+      // Loan/HP repayments do NOT affect account balance — show separately under each loan
       const isLoanTxn = (t) =>
         (t.narration || '').toLowerCase().includes('loan repayment') ||
         (t.narration || '').toLowerCase().includes('hp repayment') ||
-        (t.type === 'debit' && (t.loan_id || t.loanId || t.hp_agreement_id || t.hpAgreementId));
+        (t.narration || '').toLowerCase().includes('loan offset') ||
+        !!(t.loanId || t.loan_id) ||
+        !!(t.hpAgreementId || t.hp_agreement_id) ||
+        (t.type === 'debit' && t.channel === 'collection');
 
       const savingsTxns = periodTxns.filter(t => !isLoanTxn(t));
       const loanTxns    = periodTxns.filter(t =>  isLoanTxn(t));
