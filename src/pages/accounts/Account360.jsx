@@ -87,10 +87,97 @@ export default function Account360() {
       if (error) { setOffsetMsg('Error: ' + error.message); }
       else {
         setOffsetMsg(`✅ ${GHS(applyAmt)} applied to loan. Outstanding reduced to ${GHS(Math.max(0, outstanding - applyAmt))}.`);
-        doSearch(); // refresh
+        // Re-fetch fresh data directly from Supabase — bypass stale context
+        await doSearchFresh();
       }
     } catch (e) { setOffsetMsg('Error: ' + e.message); }
     setOffsetting(null);
+  };
+
+  // ── Fresh search — reads directly from Supabase, not context cache ────────
+  const doSearchFresh = async () => {
+    const q = search.trim().toLowerCase();
+    if (!q) return;
+    const { supabase: sb } = await import('../../core/supabase');
+
+    // Find account
+    let accData = null;
+    const { data: byNum } = await sb.from('accounts')
+      .select('*, customers(*)')
+      .ilike('account_number', `%${q}%`).limit(1);
+    if (byNum?.length) { accData = byNum[0]; }
+
+    if (!accData) {
+      const { data: custs } = await sb.from('customers')
+        .select('id').or(`phone.eq.${q},name.ilike.%${q}%,ghana_card.eq.${q}`).limit(1);
+      if (custs?.length) {
+        const { data: accs } = await sb.from('accounts')
+          .select('*, customers(*)').eq('customer_id', custs[0].id).limit(1);
+        if (accs?.length) accData = accs[0];
+      }
+    }
+    if (!accData) { setResult(null); return; }
+
+    const custId = accData.customer_id;
+    const [accsRes, loansRes, txnsRes, hpRes] = await Promise.all([
+      sb.from('accounts').select('*, customers(*)').eq('customer_id', custId),
+      sb.from('loans').select('*').eq('customer_id', custId).order('created_at', { ascending: false }),
+      sb.from('transactions').select('*, accounts(account_number)').in('account_id',
+        (await sb.from('accounts').select('id').eq('customer_id', custId)).data?.map(a => a.id) || []
+      ).order('created_at', { ascending: false }).limit(20),
+      sb.from('hp_agreements').select('*').eq('customer_id', custId),
+    ]);
+
+    const allCustAccounts = (accsRes.data || []).map(a => ({
+      ...a,
+      id: a.id, balance: Number(a.balance || 0),
+      accountNumber: a.account_number, type: a.type, status: a.status,
+      interestRate: a.interest_rate, customerId: a.customer_id,
+    }));
+    const custLoans = (loansRes.data || []).map(l => ({
+      ...l,
+      id: l.id, outstanding: Number(l.outstanding || 0),
+      type: l.type, status: l.status,
+      monthlyPayment: Number(l.monthly_payment || 0),
+      interestRate: l.interest_rate,
+      accountId: l.account_id, customerId: l.customer_id,
+      itemName: l.item_name,
+    }));
+    const custTxns = (txnsRes.data || []).map(t => ({
+      ...t,
+      id: t.id, amount: Number(t.amount || 0),
+      type: t.type, narration: t.narration,
+      createdAt: t.created_at, balanceAfter: Number(t.balance_after || 0),
+      posterName: t.poster_name,
+      accountId: t.account_id,
+    }));
+    const custAgreements = (hpRes.data || []).map(a => ({
+      ...a,
+      id: a.id, totalPaid: Number(a.total_paid || 0),
+      totalPrice: Number(a.total_price || 0),
+      remaining: Number(a.remaining || 0),
+      status: a.status, paymentFrequency: a.payment_frequency,
+      itemName: a.item_name,
+      progress: a.total_price > 0 ? Math.min(100, ((a.total_paid || 0) / a.total_price) * 100) : 0,
+    }));
+
+    const customer = accData.customers || {};
+    const normCust = {
+      ...customer,
+      name: customer.name, phone: customer.phone, email: customer.email,
+      kycStatus: customer.kyc_status, ghanaCard: customer.ghana_card,
+      monthlyIncome: customer.monthly_income, address: customer.address,
+    };
+
+    setResult({
+      acc: allCustAccounts.find(a => a.id === accData.id) || allCustAccounts[0],
+      customer: normCust,
+      allCustAccounts,
+      custTxns,
+      custLoans,
+      custAgreements,
+      custRules: result?.custRules || [],
+    });
   };
 
   return (
