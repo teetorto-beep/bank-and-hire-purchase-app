@@ -689,7 +689,7 @@ export const pendingDB = {
   async getAll() {
     return supabase
       .from('pending_transactions')
-      .select('*, accounts(account_number, customers(name))')
+      .select('*')
       .order('submitted_at', { ascending: false });
   },
 
