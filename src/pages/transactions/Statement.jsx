@@ -616,8 +616,8 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                   return (!statement.dateFrom || d >= statement.dateFrom) && (!statement.dateTo || d <= statement.dateTo);
                 });
 
-                // Use principal - outstanding for accurate total repaid
-                const totalRepaid = Math.max(0, principal - Number(loan.outstanding || 0));
+                // Total repaid = sum of all matching repayment transactions (most accurate)
+                const totalRepaid = allRepayTxns.reduce((s, t) => s + Number(t.amount || 0), 0);
 
                 return (
                   <div key={loan.id} style={{ marginBottom: lIdx < statement.acctLoans.length - 1 ? 24 : 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>

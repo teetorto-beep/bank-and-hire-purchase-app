@@ -1297,16 +1297,13 @@ export const collectionsDB = {
           updated_at: new Date().toISOString(),
         }).eq('id', loanId);
 
-        // ── Split payment into interest + principal for GL ──────────────────
-        // Monthly interest = outstanding * (annual_rate / 12 / 100)
+        // GL split for reporting only — does NOT affect outstanding
         const monthlyRate = Number(loan.interest_rate || 0) / 100 / 12;
         const interestPortion = Math.min(
           amount,
           Math.round(Number(loan.outstanding) * monthlyRate * 100) / 100
         );
         const principalPortion = Math.max(0, amount - interestPortion);
-
-        // Post to GL: principal reduces loan receivable, interest is income
         try {
           await postLoanRepaymentToGL(loanId, principalPortion, interestPortion, userName);
         } catch (_) {}
@@ -1332,7 +1329,7 @@ export const collectionsDB = {
           collected_by: userName,
         });
 
-        // ── Reduce linked loan + split interest for GL ──────────────────────
+        // ── Reduce linked loan by full payment amount ───────────────────────
         if (agr.loan_id) {
           const { data: loan } = await supabase
             .from('loans')
@@ -1348,7 +1345,7 @@ export const collectionsDB = {
               updated_at: new Date().toISOString(),
             }).eq('id', agr.loan_id);
 
-            // Split into interest + principal for GL
+            // GL split for reporting only — does NOT affect outstanding
             const monthlyRate = Number(loan.interest_rate || 0) / 100 / 12;
             const interestPortion = Math.min(
               amount,
