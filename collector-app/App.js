@@ -6,25 +6,28 @@ import { supabase } from './src/supabase';
 import { subscribeToNetwork, syncQueue, getQueue } from './src/offline';
 import { subscribeToNotifications, subscribeToApprovals, subscribeToCollections } from './src/notifications';
 import { C, GHS } from './src/theme';
-import LoginScreen        from './src/screens/LoginScreen';
-import CreditScreen       from './src/screens/CreditScreen';
-import ReportScreen       from './src/screens/ReportScreen';
-import AccountScreen      from './src/screens/AccountScreen';
+import LoginScreen         from './src/screens/LoginScreen';
+import CreditScreen        from './src/screens/CreditScreen';
+import ReportScreen        from './src/screens/ReportScreen';
+import AccountScreen       from './src/screens/AccountScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
+import ApprovalsScreen     from './src/screens/ApprovalsScreen';
 
 const TABS = [
-  { key: 'report',  label: 'Dashboard', icon: '⊞' },
-  { key: 'credit',  label: 'Record',    icon: '＋', center: true },
-  { key: 'account', label: 'Accounts',  icon: '◈' },
+  { key: 'report',    label: 'Dashboard',  icon: '⊞' },
+  { key: 'credit',    label: 'Record',     icon: '＋', center: true },
+  { key: 'approvals', label: 'Approvals',  icon: '✅' },
+  { key: 'account',   label: 'Accounts',   icon: '◈' },
 ];
 
 function MainApp({ collector, onLogout }) {
-  const [tab,        setTab]        = useState('report');
-  const [unread,     setUnread]     = useState(0);
-  const [todayTotal, setTodayTotal] = useState(0);
-  const [isOnline,   setIsOnline]   = useState(true);
-  const [syncing,    setSyncing]    = useState(false);
-  const [toasts,     setToasts]     = useState([]);
+  const [tab,           setTab]           = useState('report');
+  const [unread,        setUnread]        = useState(0);
+  const [todayTotal,    setTodayTotal]    = useState(0);
+  const [isOnline,      setIsOnline]      = useState(true);
+  const [syncing,       setSyncing]       = useState(false);
+  const [toasts,        setToasts]        = useState([]);
+  const [pendingCount,  setPendingCount]  = useState(0);
 
   const addToast = (title, message, type = 'info') => {
     const id = Date.now();
@@ -42,6 +45,20 @@ function MainApp({ collector, onLogout }) {
   };
 
   useEffect(() => { loadTodayTotal(); }, []);
+
+  // Load pending count for badge
+  useEffect(() => {
+    const loadPending = async () => {
+      try {
+        const { data: pt } = await supabase.from('pending_transactions')
+          .select('id').eq('submitted_by', collector.id).eq('status', 'pending');
+        const { data: pa } = await supabase.from('pending_approvals')
+          .select('id').eq('submitted_by', collector.id).eq('status', 'pending');
+        setPendingCount((pt?.length || 0) + (pa?.length || 0));
+      } catch (_) {}
+    };
+    loadPending();
+  }, [collector.id]);
 
   useEffect(() => {
     let unsub;
@@ -133,10 +150,11 @@ function MainApp({ collector, onLogout }) {
 
       {/* Content */}
       <View style={S.content}>
-        {tab === 'report'  && <ReportScreen  collector={collector} onLogout={onLogout} />}
-        {tab === 'credit'  && <CreditScreen  collector={collector} onDone={() => { loadTodayTotal(); setTab('report'); }} />}
-        {tab === 'account' && <AccountScreen collector={collector} />}
-        {tab === 'notifs'  && <NotificationsScreen collector={collector} onRead={() => setUnread(0)} />}
+        {tab === 'report'    && <ReportScreen    collector={collector} onLogout={onLogout} />}
+        {tab === 'credit'    && <CreditScreen    collector={collector} onDone={() => { loadTodayTotal(); setTab('report'); }} />}
+        {tab === 'account'   && <AccountScreen   collector={collector} />}
+        {tab === 'approvals' && <ApprovalsScreen collector={collector} />}
+        {tab === 'notifs'    && <NotificationsScreen collector={collector} onRead={() => setUnread(0)} />}
       </View>
 
       {/* Tab bar */}
@@ -157,6 +175,11 @@ function MainApp({ collector, onLogout }) {
             <TouchableOpacity key={t.key} style={S.tabItem} onPress={() => setTab(t.key)} activeOpacity={0.7}>
               <View style={[S.tabIconWrap, active && { backgroundColor: C.greenBg }]}>
                 <Text style={[S.tabIcon, active && { color: C.brand }]}>{t.icon}</Text>
+                {t.key === 'approvals' && pendingCount > 0 && (
+                  <View style={S.tabBadge}>
+                    <Text style={S.tabBadgeTxt}>{pendingCount > 9 ? '9+' : pendingCount}</Text>
+                  </View>
+                )}
               </View>
               <Text style={[S.tabLabel, active && S.tabLabelActive]}>{t.label}</Text>
             </TouchableOpacity>
@@ -242,4 +265,6 @@ const S = StyleSheet.create({
   tabCenter: { flex: 1, alignItems: 'center', marginTop: -16 },
   tabCenterBtn: { width: 50, height: 50, borderRadius: 16, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: C.white, ...C.shadow },
   tabCenterIcon: { fontSize: 24, color: C.text3, fontWeight: '900' },
+  tabBadge:      { position: 'absolute', top: -4, right: -4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  tabBadgeTxt:   { color: '#fff', fontSize: 8, fontWeight: '900' },
 });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -17,42 +17,24 @@ const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFrac
 const fmt = (n) => Number(n || 0).toLocaleString('en-GH');
 
 function KPICard({ label, value, sub, icon: Icon, color, onClick, trend }) {
-  const [visible, setVisible] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) setVisible(true); }, { threshold: 0.1 });
-    if (ref.current) obs.observe(ref.current);
-    return () => obs.disconnect();
-  }, []);
-
   return (
     <div
-      ref={ref}
       className="card"
       onClick={onClick}
       style={{
         padding: '18px 20px',
         cursor: onClick ? 'pointer' : 'default',
         borderLeft: `4px solid ${color}`,
+        transition: 'box-shadow .15s',
         position: 'relative',
         overflow: 'hidden',
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(16px)',
-        transition: 'opacity .4s ease, transform .4s ease, box-shadow .2s ease',
       }}
-      onMouseEnter={e => { if (onClick) e.currentTarget.style.transform = 'translateY(-3px)'; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
     >
-      {/* Background icon watermark */}
-      <div style={{ position: 'absolute', right: 12, top: 12, opacity: .06, transition: 'opacity .2s, transform .2s' }}
-        onMouseEnter={e => { e.currentTarget.style.opacity = '.12'; e.currentTarget.style.transform = 'scale(1.1) rotate(-8deg)'; }}
-        onMouseLeave={e => { e.currentTarget.style.opacity = '.06'; e.currentTarget.style.transform = ''; }}>
-        <Icon size={52} />
+      <div style={{ position: 'absolute', right: 16, top: 16, opacity: .08 }}>
+        <Icon size={48} />
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 900, color, lineHeight: 1.1, marginBottom: 4,
-        animation: visible ? 'countUp .5s ease both' : 'none' }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, color, lineHeight: 1.1, marginBottom: 4 }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{sub}</div>}
       {trend !== undefined && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 12, color: trend >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
@@ -60,11 +42,6 @@ function KPICard({ label, value, sub, icon: Icon, color, onClick, trend }) {
           {Math.abs(trend)}% vs last month
         </div>
       )}
-      {/* Bottom shimmer line on hover */}
-      <div style={{ position: 'absolute', bottom: 0, left: 0, height: 2, width: '100%',
-        background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
-        opacity: 0, transition: 'opacity .2s' }}
-        className="kpi-shimmer" />
     </div>
   );
 }

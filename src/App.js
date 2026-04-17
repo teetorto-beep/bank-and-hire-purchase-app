@@ -58,7 +58,7 @@ function AppContent({ user, onLogout }) {
         <Sidebar user={user} onLogout={onLogout} mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="main-area">
           <TopBar user={user} onMenuClick={() => setSidebarOpen(p => !p)} />
-          <main className="page-content page-enter">
+          <main className="page-content">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
