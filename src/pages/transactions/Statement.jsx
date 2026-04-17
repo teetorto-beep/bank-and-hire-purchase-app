@@ -533,8 +533,8 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: '#1e293b' }}>
-                  {['Date', 'Value Date', 'Reference', 'Description / Narration', 'Debit (GH\u20B5)', 'Credit (GH\u20B5)', 'Balance (GH\u20B5)'].map((h, i) => (
-                    <th key={h} style={{ padding: '10px 12px', color: '#fff', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: i >= 4 ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                  {['Date', 'Value Date', 'Reference', 'Description / Narration', 'Debit (GH\u20B5)', 'Credit (GH\u20B5)', 'Balance (GH\u20B5)', 'Posted By'].map((h, i) => (
+                    <th key={h} style={{ padding: '10px 12px', color: '#fff', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, textAlign: i >= 4 && i <= 6 ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -551,9 +551,6 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                         {t.reversed && <span style={{ fontSize: 9, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>REVERSED</span>}
                         {t.balanceUnchanged && <span style={{ fontSize: 9, background: '#eff6ff', color: '#1d4ed8', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>COLLECTION</span>}
                       </div>
-                      {t.posterName && t.posterName !== '—' && (
-                        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>by {t.posterName}</div>
-                      )}
                     </td>
                     <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: t.balanceUnchanged ? '#94a3b8' : '#dc2626', whiteSpace: 'nowrap' }}>
                       {t.type === 'debit' ? Number(t.amount).toLocaleString('en-GH', { minimumFractionDigits: 2 }) : ''}
@@ -564,12 +561,15 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 600, color: t.balanceUnchanged ? '#94a3b8' : '#0f172a', whiteSpace: 'nowrap' }}>
                       {t.balanceUnchanged ? '—' : Number(t.computedBalance ?? t.balanceAfter ?? 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
                     </td>
+                    <td style={{ padding: '9px 12px', fontSize: 11, color: '#475569', whiteSpace: 'nowrap' }}>
+                      {t.posterName && t.posterName !== '—' ? t.posterName : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr style={{ background: '#1e293b' }}>
-                  <td colSpan={4} style={{ padding: '10px 12px', color: '#fff', fontWeight: 700, fontSize: 11 }}>TOTALS</td>
+                  <td colSpan={5} style={{ padding: '10px 12px', color: '#fff', fontWeight: 700, fontSize: 11 }}>TOTALS</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', color: '#fca5a5', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>
                     {Number(statement.totalDebits + (statement.totalCollectionDebits || 0)).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
                   </td>
