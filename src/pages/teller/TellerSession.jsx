@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { authDB } from '../../core/db';
-import { Search, Printer, Download, CheckCircle, AlertCircle, TrendingUp, DollarSign, BookOpen, Monitor, Clock } from 'lucide-react';
+import { Printer, Download, CheckCircle, AlertCircle, TrendingUp, DollarSign, BookOpen, Monitor, Clock } from 'lucide-react';
 import { exportCSV } from '../../core/export';
-import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
+import PostTransaction from '../transactions/PostTransaction';
 
 const GHS = (n) => `GH₵ ${Number(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
 
@@ -55,21 +55,10 @@ function printReceipt({ ref, account, customer, type, amount, balanceAfter, tell
 }
 
 export default function TellerSession() {
-  const { accounts, customers, transactions, pendingTxns, postTransaction, glTransfer, submitForApproval } = useApp();
+  const { accounts, customers, transactions, pendingTxns, postTransaction, glTransfer } = useApp();
   const currentUser = authDB.currentUser();
 
   const [tab, setTab] = useState('post');
-
-  // --- Post Transaction state ---
-  const [search, setSearch] = useState('');
-  const [selAcc, setSelAcc] = useState(null);
-  const [txType, setTxType] = useState('credit');
-  const [amount, setAmount] = useState('');
-  const [narration, setNarration] = useState('');
-  const [posting, setPosting] = useState(false);
-  const [postError, setPostError] = useState('');
-  const [receipt, setReceipt] = useState(null);
-  const [pendingMsg, setPendingMsg] = useState('');
 
   // --- My Report state ---
   const today = new Date().toISOString().slice(0, 10);
@@ -91,16 +80,7 @@ export default function TellerSession() {
   const [glError, setGlError] = useState('');
   const [glSuccess, setGlSuccess] = useState('');
 
-  // Account search results
-  const searchResults = useMemo(() => {
-    if (!search || search.length < 2) return [];
-    const q = search.toLowerCase();
-    return (accounts || []).filter(a =>
-      a.accountNumber?.toLowerCase().includes(q)
-    ).slice(0, 8);
-  }, [search, accounts]);
-
-  const getCustomer = (acc) => (customers || []).find(c => c.id === acc?.customerId);
+  const getCustomer = (acc) => (customers || []).find(c => c.id === (acc?.customerId || acc?.customer_id));
 
   // My Report: teller's transactions in date range
   const reportTxns = useMemo(() => {
@@ -167,65 +147,6 @@ export default function TellerSession() {
     [pendingTxns, currentUser]
   );
   const myPendingCount = myPending.filter(t => t.status === 'pending').length;
-  const handlePost = async (e) => {
-    e.preventDefault();
-    if (!selAcc) return setPostError('Select an account first.');
-    if (!amount || isNaN(amount) || Number(amount) <= 0) return setPostError('Enter a valid amount.');
-    if (!narration.trim()) return setPostError('Enter a narration.');
-    setPosting(true);
-    setPostError('');
-    setPendingMsg('');
-    try {
-      const rules = await loadApprovalRules();
-      const role  = currentUser?.role || 'teller';
-      const amt   = Number(amount);
-      const action = txType === 'credit' ? 'credit' : 'debit';
-      const needsApproval = requiresApproval(action, role, amt, rules);
-
-      if (needsApproval) {
-        // Submit for approval instead of posting directly
-        await submitForApproval('transaction', {
-          accountId: selAcc.id,
-          type: txType,
-          amount: amt,
-          narration,
-          channel: 'teller',
-          accountNumber: selAcc.accountNumber,
-          customerName: getCustomer(selAcc)?.name || '—',
-        });
-        setPendingMsg(`Transaction of ${GHS(amt)} submitted for approval. A manager must approve before it posts.`);
-        setAmount('');
-        setNarration('');
-        setSearch('');
-        setSelAcc(null);
-      } else {
-        const result = await postTransaction({
-          accountId: selAcc.id,
-          type: txType,
-          amount: amt,
-          narration,
-          channel: 'teller',
-        });
-        const cust = getCustomer(selAcc);
-        setReceipt({
-          ref: result?.reference || result?.id || `TXN-${Date.now()}`,
-          account: selAcc,
-          customer: cust,
-          type: txType,
-          amount: amt,
-          balanceAfter: result?.balanceAfter ?? (txType === 'credit' ? (selAcc.balance || 0) + amt : (selAcc.balance || 0) - amt),
-          tellerName: currentUser?.name || 'Teller',
-        });
-        setAmount('');
-        setNarration('');
-        setSearch('');
-        setSelAcc(null);
-      }
-    } catch (err) {
-      setPostError(err?.message || 'Transaction failed.');
-    }
-    setPosting(false);
-  };
 
   const handleGLSubmit = async (e) => {
     e.preventDefault();
@@ -431,190 +352,7 @@ export default function TellerSession() {
       </div>
 
       {/* ===== POST TRANSACTION TAB ===== */}
-      {tab === 'post' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">Post Transaction</div>
-            </div>
-            <div style={{ padding: '16px 20px' }}>
-              {/* Account Search */}
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Search Account</label>
-                <div style={{ position: 'relative' }}>
-                  <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-                  <input
-                    className="form-control"
-                    style={{ paddingLeft: 32 }}
-                    placeholder="Account number, name or phone…"
-                    value={search}
-                    onChange={e => { setSearch(e.target.value); setSelAcc(null); setReceipt(null); }}
-                  />
-                </div>
-                {searchResults.length > 0 && !selAcc && (
-                  <div style={{ border: '1px solid #1e293b', borderRadius: 6, marginTop: 4, background: '#0f172a', maxHeight: 200, overflowY: 'auto' }}>
-                    {searchResults.map(acc => {
-                      const cust = getCustomer(acc);
-                      return (
-                        <div
-                          key={acc.id}
-                          onClick={() => { setSelAcc(acc); setSearch(acc.accountNumber); }}
-                          style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #1e293b', fontSize: 13 }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#1e293b'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                        >
-                          <div style={{ fontWeight: 600 }}>{acc.accountNumber}</div>
-                          <div style={{ color: '#94a3b8', fontSize: 12 }}>{cust?.name} · {cust?.phone}</div>
-                          <div style={{ color: '#64748b', fontSize: 11 }}>Balance: {GHS(acc.balance)}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Selected account info */}
-              {selAcc && (
-                <div style={{ background: '#1e293b', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13 }}>
-                  <div style={{ fontWeight: 700 }}>{selAcc.accountNumber} — {getCustomer(selAcc)?.name}</div>
-                  <div style={{ color: '#94a3b8' }}>Balance: <strong style={{ color: '#22c55e' }}>{GHS(selAcc.balance)}</strong></div>
-                </div>
-              )}
-
-              {/* Credit / Debit toggle */}
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Transaction Type</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {['credit', 'debit'].map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTxType(t)}
-                      style={{
-                        flex: 1, padding: '8px', border: '1px solid',
-                        borderColor: txType === t ? (t === 'credit' ? '#22c55e' : '#ef4444') : '#1e293b',
-                        borderRadius: 6, background: txType === t ? (t === 'credit' ? '#14532d' : '#450a0a') : 'transparent',
-                        color: txType === t ? '#fff' : '#64748b', cursor: 'pointer', fontWeight: 600, fontSize: 13,
-                        textTransform: 'capitalize',
-                      }}
-                    >{t}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Amount */}
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Amount (GH₵)</label>
-                <input
-                  className="form-control"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                />
-              </div>
-
-              {/* Narration */}
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Narration</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                  {NARRATION_PRESETS.map(p => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setNarration(p)}
-                      style={{
-                        fontSize: 11, padding: '3px 8px', border: '1px solid #1e293b',
-                        borderRadius: 12, background: narration === p ? '#1a56db' : 'transparent',
-                        color: narration === p ? '#fff' : '#94a3b8', cursor: 'pointer',
-                      }}
-                    >{p}</button>
-                  ))}
-                </div>
-                <input
-                  className="form-control"
-                  placeholder="Or type narration…"
-                  value={narration}
-                  onChange={e => setNarration(e.target.value)}
-                />
-              </div>
-
-              {postError && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ef4444', fontSize: 13, marginBottom: 10 }}>
-                  <AlertCircle size={14} /> {postError}
-                </div>
-              )}
-              {pendingMsg && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef9c3', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#92400e', marginBottom: 10 }}>
-                  <AlertCircle size={14} style={{ marginTop: 1, flexShrink: 0, color: '#d97706' }} />
-                  <span>{pendingMsg}</span>
-                </div>
-              )}
-
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%' }}
-                onClick={handlePost}
-                disabled={posting}
-              >
-                {posting ? 'Posting…' : `Post ${txType === 'credit' ? 'Credit' : 'Debit'}`}
-              </button>
-            </div>
-          </div>
-
-          {/* Receipt panel */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">Receipt</div>
-            </div>
-            <div style={{ padding: '16px 20px' }}>
-              {receipt ? (
-                <div style={{ textAlign: 'center' }}>
-                  <CheckCircle size={40} style={{ color: '#22c55e', marginBottom: 12 }} />
-                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Transaction Successful</div>
-                  <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 16 }}>Ref: {receipt.ref}</div>
-                  <div style={{ background: '#1e293b', borderRadius: 8, padding: '14px 16px', textAlign: 'left', fontSize: 13, marginBottom: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ color: '#94a3b8' }}>Account</span>
-                      <span>{receipt.account?.accountNumber}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ color: '#94a3b8' }}>Customer</span>
-                      <span>{receipt.customer?.name}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ color: '#94a3b8' }}>Type</span>
-                      <span className={receipt.type === 'credit' ? 'badge badge-green' : 'badge badge-red'}>{receipt.type?.toUpperCase()}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ color: '#94a3b8' }}>Amount</span>
-                      <span style={{ fontWeight: 700 }}>{GHS(receipt.amount)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#94a3b8' }}>Balance After</span>
-                      <span>{GHS(receipt.balanceAfter)}</span>
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                    onClick={() => printReceipt(receipt)}
-                  >
-                    <Printer size={14} /> Print Receipt
-                  </button>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', color: '#475569', paddingTop: 40 }}>
-                  <DollarSign size={40} style={{ opacity: 0.3, marginBottom: 12 }} />
-                  <div>Receipt will appear here after a successful transaction.</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {tab === 'post' && <PostTransaction />}
 
       {/* ===== MY PENDING TAB ===== */}
       {tab === 'pending' && (
@@ -898,46 +636,6 @@ export default function TellerSession() {
               <div className="card-title">Post Closing Entry</div>
             </div>
             <div style={{ padding: '16px 20px' }}>
-              {/* Account search for GL */}
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Search Account</label>
-                <div style={{ position: 'relative' }}>
-                  <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-                  <input
-                    className="form-control"
-                    style={{ paddingLeft: 32 }}
-                    placeholder="Account number, name or phone…"
-                    value={search}
-                    onChange={e => { setSearch(e.target.value); setSelAcc(null); }}
-                  />
-                </div>
-                {searchResults.length > 0 && !selAcc && (
-                  <div style={{ border: '1px solid #1e293b', borderRadius: 6, marginTop: 4, background: '#0f172a', maxHeight: 180, overflowY: 'auto' }}>
-                    {searchResults.map(acc => {
-                      const cust = getCustomer(acc);
-                      return (
-                        <div
-                          key={acc.id}
-                          onClick={() => { setSelAcc(acc); setSearch(acc.accountNumber); }}
-                          style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #1e293b', fontSize: 13 }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#1e293b'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                        >
-                          <div style={{ fontWeight: 600 }}>{acc.accountNumber}</div>
-                          <div style={{ color: '#94a3b8', fontSize: 12 }}>{cust?.name}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {selAcc && (
-                <div style={{ background: '#1e293b', borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 13 }}>
-                  <span style={{ fontWeight: 600 }}>{selAcc.accountNumber}</span> — {getCustomer(selAcc)?.name}
-                </div>
-              )}
-
               <div style={{ marginBottom: 14 }}>
                 <label className="form-label">GL Account Code</label>
                 <input
