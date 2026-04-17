@@ -31,7 +31,8 @@ function getTypeMeta(item) {
 function getTitle(item) {
   const p = item.payload || {};
   if (item._source === 'pending_txn') {
-    return `${item.type === 'credit' ? 'Credit' : 'Debit'} — ${GHS(item.amount)}`;
+    const amt = item.amount || p.amount || 0;
+    return `${item.type === 'credit' ? 'Credit' : 'Debit'} — ${GHS(amt)}`;
   }
   if (item.type === 'customer') return p.name || 'New Customer';
   if (item.type === 'account')  return `${p.customerName || p.name || '—'} · ${(p.type || p.category || '').replace(/_/g,' ')}`;
@@ -45,11 +46,12 @@ function getDetails(item) {
   const p = item.payload || {};
   if (item._source === 'pending_txn') {
     return [
-      ['Account', item.accountNumber || '—'],
-      ['Customer', item.customerName || '—'],
-      ['Amount', GHS(item.amount)],
-      ['Narration', item.narration || '—'],
-      ['Channel', item.channel || 'teller'],
+      ['Account',   item.accountNumber || p.accountId || '—'],
+      ['Customer',  item.customerName  || '—'],
+      ['Amount',    GHS(item.amount || p.amount || 0)],
+      ['Narration', item.narration || p.narration || '—'],
+      ['Channel',   item.channel   || p.channel   || 'teller'],
+      ['Type',      item.type || '—'],
     ];
   }
   if (item.type === 'customer') return [['Name', p.name], ['Phone', p.phone], ['Email', p.email || '—'], ['Ghana Card', p.ghana_card || p.ghanaCard || '—']];
@@ -78,10 +80,19 @@ export default function PendingApprovals() {
       ...t,
       _source:        'pending_txn',
       type:           t.type || 'credit',
-      submitted_at:   t.submittedAt || t.submitted_at || t.createdAt,
+      // normalize field names — pendingTxns uses camelCase after normPendingTxn
+      submitted_at:   t.submittedAt || t.submitted_at || t.createdAt || '',
       submitter_name: t.submitterName || t.submitter_name || '—',
       submitted_by:   t.submittedBy  || t.submitted_by  || '',
-      payload:        { amount: t.amount, narration: t.narration, type: t.type, accountId: t.accountId, channel: t.channel },
+      approver_name:  t.approverName || t.approver_name || '',
+      rejector_name:  t.rejectorName || t.rejector_name || '',
+      payload: {
+        amount:    t.amount,
+        narration: t.narration,
+        type:      t.type,
+        accountId: t.accountId,
+        channel:   t.channel,
+      },
     }));
     return [...fromApprovals, ...fromPending]
       .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
@@ -107,7 +118,8 @@ export default function PendingApprovals() {
   }), [allItems]);
 
   const handleApprove = async (item) => {
-    if (item.submitted_by === user?.id) { setError('You cannot approve your own submission.'); return; }
+    const submittedBy = item.submitted_by || item.submittedBy || '';
+    if (submittedBy === user?.id) { setError('You cannot approve your own submission.'); return; }
     setProcessing(item.id); setError('');
     let result;
     if (item._source === 'pending_txn') {
@@ -211,7 +223,7 @@ export default function PendingApprovals() {
                 const meta    = getTypeMeta(item);
                 const title   = getTitle(item);
                 const details = getDetails(item);
-                const isMine  = item.submitted_by === user?.id;
+                const isMine  = (item.submitted_by || item.submittedBy) === user?.id;
                 return (
                   <div key={item.id} style={{ border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', background: 'var(--surface)', boxShadow: 'var(--shadow-sm)' }}>
                     {/* Header */}
