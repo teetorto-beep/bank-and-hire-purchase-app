@@ -260,9 +260,9 @@ export const transactionsDB = {
   async getAll(filters = {}) {
     let q = supabase
       .from('transactions')
-      .select('*, accounts(account_number, customers(name))')
+      .select('*, accounts(account_number, customer_id, customers(name))')
       .order('created_at', { ascending: false })
-      .limit(500);
+      .limit(2000);
 
     if (filters.accountId) q = q.eq('account_id', filters.accountId);
     if (filters.type) q = q.eq('type', filters.type);
@@ -270,6 +270,14 @@ export const transactionsDB = {
     if (filters.dateTo) q = q.lte('created_at', filters.dateTo);
 
     return q;
+  },
+
+  async getById(id) {
+    return supabase
+      .from('transactions')
+      .select('*, accounts(account_number, customer_id, customers(name))')
+      .eq('id', id)
+      .single();
   },
 
   async getByAccount(accountId, dateFrom, dateTo) {

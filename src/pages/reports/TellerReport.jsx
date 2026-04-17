@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Download, FileText, CheckCircle, XCircle, AlertCircle, User, Printer, TrendingUp } from 'lucide-react';
+import { Download, CheckCircle, XCircle, AlertCircle, User, Printer } from 'lucide-react';
 import { exportCSV } from '../../core/export';
 import { authDB } from '../../core/db';
 
@@ -8,109 +8,7 @@ const GHS = (n) => `GH\u20B5 ${Number(n || 0).toLocaleString('en-GH', { minimumF
 const fmtTime = (v) => v ? new Date(v).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '\u2014';
 const fmtDate = (v) => v ? new Date(v).toLocaleDateString('en-GH', { day: 'numeric', month: 'short', year: 'numeric' }) : '\u2014';
 
-export default function TellerReport() {
-  const { transactions, accounts, customers, users } = useApp();
-  const user = authDB.currentUser();
-  const isAdmin = user?.role === 'admin' || user?.role === 'manager';
-
-  const today = new Date().toISOString().split('T')[0];
-  const [dateFrom, setDateFrom] = useState(today);
-  const [dateTo, setDateTo]     = useState(today);
-  const [tellerFilter, setTellerFilter] = useState('all');
-  const [channelFilter, setChannelFilter] = useState('teller');
-  const [showReversed, setShowReversed] = useState(false);
-
-  // Build teller list from registered users + anyone who posted a transaction
-  const tellers = useMemo(() => {
-    const map = {};
-    // From users table — all staff who can post transactions
-    (users || []).filter(u => ['admin','manager','teller'].includes(u.role)).forEach(u => {
-      map[u.name] = { name: u.name, phone: u.phone || '', id: u.id };
-    });
-    // Also include anyone who posted a transaction (catches legacy data)
-    transactions.forEach(t => {
-      if (t.posterName && !map[t.posterName]) {
-        map[t.posterName] = { name: t.posterName, phone: t.posterPhone || '', id: null };
-      }
-    });
-    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
-  }, [users, transactions]);
-
-  // Filtered transactions
-  const filtered = useMemo(() => {
-    return transactions.filter(t => {
-      const d = t.createdAt ? t.createdAt.slice(0, 10) : '';
-      if (d < dateFrom || d > dateTo) return false;
-      if (tellerFilter !== 'all' && t.posterName !== tellerFilter) return false;
-      if (channelFilter !== 'all' && (t.channel || 'teller') !== channelFilter) return false;
-      if (!showReversed && t.reversed) return false;
-      return true;
-    }).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  }, [transactions, dateFrom, dateTo, tellerFilter, channelFilter, showReversed]);
-
-  // Totals
-  const totalCredits = filtered.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-  const totalDebits  = filtered.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
-  const netCash      = totalCredits - totalDebits;
-
-  // Per-teller breakdown
-  const byTeller = useMemo(() => {
-    const map = {};
-    filtered.forEach(t => {
-      const key = t.posterName || 'Unknown';
-      if (!map[key]) map[key] = { name: key, phone: t.posterPhone || '', credits: 0, debits: 0, count: 0, txns: [] };
-      map[key].txns.push(t);
-      map[key].count++;
-      if (t.type === 'credit') map[key].credits += t.amount;
-      else map[key].debits += t.amount;
-    });
-    return Object.values(map).sort((a, b) => (b.credits + b.debits) - (a.credits + a.debits));
-  }, [filtered]);
-
-  // Opening balance = sum of all account balances at start of day (approximation)
-  // We use the first transaction's balance_after - amount as opening
-  const openingBalance = useMemo(() => {
-    if (filtered.length === 0) return 0;
-    const first = filtered[0];
-    return first.type === 'credit'
-      ? Number(first.balanceAfter || 0) - Number(first.amount || 0)
-      : Number(first.balanceAfter || 0) + Number(first.amount || 0);
-  }, [filtered]);
-
-  const closingBalance = openingBalance + totalCredits - totalDebits;
-
-  const handlePrint = () => {
-    const win = window.open('', '_blank', 'width=1000,height=800');
-    const tellerRows = byTeller.map(t => `
-      <tr>
-        <td><strong>${t.name}</strong></td>
-        <td>${t.phone || '\u2014'}</td>
-        <td style="text-align:right;color:#16a34a;font-weight:700">${GHS(t.credits)}</td>
-        <td style="text-align:right;color:#dc2626;font-weight:700">${GHS(t.debits)}</td>
-        <td style="text-align:right;font-weight:700;color:${(t.credits-t.debits)>=0?'#16a34a':'#dc2626'}">${GHS(t.credits - t.debits)}</td>
-        <td style="text-align:center">${t.count}</td>
-      </tr>`).join('');
-
-    const txnRows = filtered.map((t, i) => {
-      const acc = accounts.find(a => a.id === t.accountId);
-      const cust = customers.find(c => c.id === (acc?.customerId || acc?.customer_id));
-      return `<tr style="background:${i%2===0?'#fff':'#f8fafc'}">
-        <td style="white-space:nowrap;font-size:11px">${fmtTime(t.createdAt)}</td>
-        <td style="font-family:monospace;font-size:10px">${t.reference}</td>
-        <td style="font-family:monospace;font-size:11px">${acc?.accountNumber || acc?.account_number || '\u2014'}</td>
-        <td style="font-size:11px">${cust?.name || t.customerName || '\u2014'}</td>
-        <td style="font-size:11px;max-width:160px">${t.narration || '\u2014'}</td>
-        <td style="text-align:right;color:#dc2626;font-weight:700">${t.type==='debit'?GHS(t.amount):''}</td>
-        <td style="text-align:right;color:#16a34a;font-weight:700">${t.type==='credit'?GHS(t.amount):''}</td>
-        <td style="text-align:right;font-size:11px">${GHS(t.balanceAfter)}</td>
-        <td style="font-size:11px">${t.posterName || '\u2014'}</td>
-        <td style="font-size:10px;color:${t.reversed?'#dc2626':'#16a34a'}">${t.reversed?'REVERSED':'POSTED'}</td>
-      </tr>`;
-    }).join('');
-
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Teller Call-Over Report</title>
-<style>
+const PRINT_STYLES = `
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:Arial,sans-serif; font-size:12px; color:#1a1a2e; padding:24px; }
 .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #1a56db; padding-bottom:14px; margin-bottom:18px; }
@@ -127,7 +25,104 @@ td { padding:6px 8px; border-bottom:1px solid #f1f5f9; }
 .closing-box { background:#0f172a; color:#fff; padding:16px 20px; border-radius:8px; margin-top:16px; display:flex; justify-content:space-between; align-items:center; }
 .footer { margin-top:20px; font-size:9px; color:#94a3b8; border-top:1px solid #e2e8f0; padding-top:10px; display:flex; justify-content:space-between; }
 @media print { body { padding:10px; } @page { margin:10mm; } }
-</style></head><body>
+`;
+
+export default function TellerReport() {
+  const { transactions, accounts, customers, users } = useApp();
+  const user = authDB.currentUser();
+
+  const today = new Date().toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState(today);
+  const [dateTo, setDateTo]     = useState(today);
+  const [tellerFilter, setTellerFilter] = useState('all');
+  const [channelFilter, setChannelFilter] = useState('teller');
+  const [showReversed, setShowReversed] = useState(false);
+
+  // Build teller list from registered users (role teller/admin/manager) + legacy transaction posters
+  const tellers = useMemo(() => {
+    const map = {};
+    (users || [])
+      .filter(u => ['admin', 'manager', 'teller'].includes(u.role))
+      .forEach(u => { map[u.name] = { name: u.name, phone: u.phone || '', id: u.id }; });
+    transactions.forEach(t => {
+      if (t.posterName && !map[t.posterName])
+        map[t.posterName] = { name: t.posterName, phone: t.posterPhone || '', id: null };
+    });
+    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
+  }, [users, transactions]);
+
+  const filtered = useMemo(() => {
+    return transactions.filter(t => {
+      const d = t.createdAt ? t.createdAt.slice(0, 10) : '';
+      if (d < dateFrom || d > dateTo) return false;
+      if (tellerFilter !== 'all' && t.posterName !== tellerFilter) return false;
+      if (channelFilter !== 'all' && (t.channel || 'teller') !== channelFilter) return false;
+      if (!showReversed && t.reversed) return false;
+      return true;
+    }).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  }, [transactions, dateFrom, dateTo, tellerFilter, channelFilter, showReversed]);
+
+  const totalCredits = filtered.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+  const totalDebits  = filtered.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+  const netCash      = totalCredits - totalDebits;
+
+  const byTeller = useMemo(() => {
+    const map = {};
+    filtered.forEach(t => {
+      const key = t.posterName || 'Unknown';
+      if (!map[key]) map[key] = { name: key, phone: t.posterPhone || '', credits: 0, debits: 0, count: 0, txns: [] };
+      map[key].txns.push(t);
+      map[key].count++;
+      if (t.type === 'credit') map[key].credits += t.amount;
+      else map[key].debits += t.amount;
+    });
+    return Object.values(map).sort((a, b) => (b.credits + b.debits) - (a.credits + a.debits));
+  }, [filtered]);
+
+  const openingBalance = useMemo(() => {
+    if (filtered.length === 0) return 0;
+    const first = filtered[0];
+    return first.type === 'credit'
+      ? Number(first.balanceAfter || 0) - Number(first.amount || 0)
+      : Number(first.balanceAfter || 0) + Number(first.amount || 0);
+  }, [filtered]);
+
+  const closingBalance = openingBalance + totalCredits - totalDebits;
+
+  // ── Build transaction rows HTML for a given list of txns ──────────────────
+  const buildTxnRows = (txns) => txns.map((t, i) => {
+    const acc  = accounts.find(a => a.id === t.accountId);
+    const cust = customers.find(c => c.id === (acc?.customerId || acc?.customer_id));
+    return `<tr style="background:${i % 2 === 0 ? '#fff' : '#f8fafc'}">
+      <td style="white-space:nowrap;font-size:11px">${fmtTime(t.createdAt)}</td>
+      <td style="font-family:monospace;font-size:10px">${t.reference}</td>
+      <td style="font-family:monospace;font-size:11px">${acc?.accountNumber || acc?.account_number || '\u2014'}</td>
+      <td style="font-size:11px">${cust?.name || t.customerName || '\u2014'}</td>
+      <td style="font-size:11px;max-width:160px">${t.narration || '\u2014'}</td>
+      <td style="text-align:right;color:#dc2626;font-weight:700">${t.type === 'debit' ? GHS(t.amount) : ''}</td>
+      <td style="text-align:right;color:#16a34a;font-weight:700">${t.type === 'credit' ? GHS(t.amount) : ''}</td>
+      <td style="text-align:right;font-size:11px">${GHS(t.balanceAfter)}</td>
+      <td style="font-size:11px">${t.posterName || '\u2014'}</td>
+      <td style="font-size:10px;color:${t.reversed ? '#dc2626' : '#16a34a'}">${t.reversed ? 'REVERSED' : 'POSTED'}</td>
+    </tr>`;
+  }).join('');
+
+  // ── Print combined report (all tellers or filtered teller) ────────────────
+  const handlePrint = () => {
+    const win = window.open('', '_blank', 'width=1000,height=800');
+    const tellerRows = byTeller.map(t => `
+      <tr>
+        <td><strong>${t.name}</strong></td>
+        <td>${t.phone || '\u2014'}</td>
+        <td style="text-align:right;color:#16a34a;font-weight:700">${GHS(t.credits)}</td>
+        <td style="text-align:right;color:#dc2626;font-weight:700">${GHS(t.debits)}</td>
+        <td style="text-align:right;font-weight:700;color:${(t.credits - t.debits) >= 0 ? '#16a34a' : '#dc2626'}">${GHS(t.credits - t.debits)}</td>
+        <td style="text-align:center">${t.count}</td>
+      </tr>`).join('');
+
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Teller Call-Over Report</title>
+<style>${PRINT_STYLES}</style></head><body>
 <div class="header">
   <div>
     <div class="bank-name">Majupat Love Enterprise</div>
@@ -141,9 +136,9 @@ td { padding:6px 8px; border-bottom:1px solid #f1f5f9; }
 </div>
 <div class="summary">
   <div class="sum-box"><div class="sum-label">Opening Balance</div><div class="sum-value" style="color:#1a56db">${GHS(openingBalance)}</div></div>
-  <div class="sum-box"><div class="sum-label">Total Credits</div><div class="sum-value" style="color:#16a34a">${GHS(totalCredits)}</div><div style="font-size:9px;color:#64748b">${filtered.filter(t=>t.type==='credit').length} txns</div></div>
-  <div class="sum-box"><div class="sum-label">Total Debits</div><div class="sum-value" style="color:#dc2626">${GHS(totalDebits)}</div><div style="font-size:9px;color:#64748b">${filtered.filter(t=>t.type==='debit').length} txns</div></div>
-  <div class="sum-box"><div class="sum-label">Net Cash</div><div class="sum-value" style="color:${netCash>=0?'#16a34a':'#dc2626'}">${GHS(netCash)}</div></div>
+  <div class="sum-box"><div class="sum-label">Total Credits</div><div class="sum-value" style="color:#16a34a">${GHS(totalCredits)}</div><div style="font-size:9px;color:#64748b">${filtered.filter(t => t.type === 'credit').length} txns</div></div>
+  <div class="sum-box"><div class="sum-label">Total Debits</div><div class="sum-value" style="color:#dc2626">${GHS(totalDebits)}</div><div style="font-size:9px;color:#64748b">${filtered.filter(t => t.type === 'debit').length} txns</div></div>
+  <div class="sum-box"><div class="sum-label">Net Cash</div><div class="sum-value" style="color:${netCash >= 0 ? '#16a34a' : '#dc2626'}">${GHS(netCash)}</div></div>
   <div class="sum-box"><div class="sum-label">Transactions</div><div class="sum-value" style="color:#7c3aed">${filtered.length}</div><div style="font-size:9px;color:#64748b">${byTeller.length} teller(s)</div></div>
 </div>
 ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
@@ -151,7 +146,7 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
 <tbody>${tellerRows}</tbody></table>` : ''}
 <div class="section-title">Transaction Details (${filtered.length})</div>
 <table><thead><tr><th>Time</th><th>Reference</th><th>Account</th><th>Customer</th><th>Narration</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th style="text-align:right">Balance</th><th>Teller</th><th>Status</th></tr></thead>
-<tbody>${txnRows}</tbody>
+<tbody>${buildTxnRows(filtered)}</tbody>
 <tfoot><tr style="background:#1e293b;color:#fff;font-weight:700">
   <td colspan="5">TOTALS</td>
   <td style="text-align:right;color:#fca5a5">${GHS(totalDebits)}</td>
@@ -179,20 +174,83 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
     win.document.close();
   };
 
+  // ── Print individual teller sheet ─────────────────────────────────────────
+  const printTellerSheet = (teller) => {
+    const win = window.open('', '_blank', 'width=1000,height=800');
+    const txns = filtered.filter(t => t.posterName === teller.name);
+    const tc = txns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+    const td = txns.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+    const tOpen = txns.length > 0
+      ? (txns[0].type === 'credit'
+          ? Number(txns[0].balanceAfter || 0) - Number(txns[0].amount || 0)
+          : Number(txns[0].balanceAfter || 0) + Number(txns[0].amount || 0))
+      : 0;
+    const tClose = tOpen + tc - td;
+
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Teller Sheet - ${teller.name}</title>
+<style>${PRINT_STYLES}</style></head><body>
+<div class="header">
+  <div>
+    <div class="bank-name">Majupat Love Enterprise</div>
+    <div style="font-size:10px;color:#64748b;margin-top:2px">Developed by Maxbraynn Technology &amp; Systems</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:1px">Teller Call-Over Sheet</div>
+    <div style="font-size:13px;color:#1a56db;font-weight:700;margin-top:4px">${teller.name}${teller.phone ? ' &nbsp;&bull;&nbsp; ' + teller.phone : ''}</div>
+    <div style="font-size:11px;color:#64748b;margin-top:2px">Period: ${dateFrom} to ${dateTo} &nbsp;|&nbsp; Generated: ${new Date().toLocaleString()}</div>
+  </div>
+</div>
+<div class="summary">
+  <div class="sum-box"><div class="sum-label">Opening Balance</div><div class="sum-value" style="color:#1a56db">${GHS(tOpen)}</div></div>
+  <div class="sum-box"><div class="sum-label">Total Credits</div><div class="sum-value" style="color:#16a34a">${GHS(tc)}</div><div style="font-size:9px;color:#64748b">${txns.filter(t => t.type === 'credit').length} txns</div></div>
+  <div class="sum-box"><div class="sum-label">Total Debits</div><div class="sum-value" style="color:#dc2626">${GHS(td)}</div><div style="font-size:9px;color:#64748b">${txns.filter(t => t.type === 'debit').length} txns</div></div>
+  <div class="sum-box"><div class="sum-label">Net Cash</div><div class="sum-value" style="color:${(tc - td) >= 0 ? '#16a34a' : '#dc2626'}">${GHS(tc - td)}</div></div>
+  <div class="sum-box"><div class="sum-label">Transactions</div><div class="sum-value" style="color:#7c3aed">${txns.length}</div></div>
+</div>
+<div class="section-title">Transaction Details (${txns.length})</div>
+<table><thead><tr><th>Time</th><th>Reference</th><th>Account</th><th>Customer</th><th>Narration</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th style="text-align:right">Balance</th><th>Teller</th><th>Status</th></tr></thead>
+<tbody>${buildTxnRows(txns)}</tbody>
+<tfoot><tr style="background:#1e293b;color:#fff;font-weight:700">
+  <td colspan="5">TOTALS</td>
+  <td style="text-align:right;color:#fca5a5">${GHS(td)}</td>
+  <td style="text-align:right;color:#86efac">${GHS(tc)}</td>
+  <td colspan="3"></td>
+</tr></tfoot></table>
+<div class="closing-box">
+  <div>
+    <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Closing Balance</div>
+    <div style="font-size:28px;font-weight:900;color:#fff">${GHS(tClose)}</div>
+    <div style="font-size:11px;color:#64748b;margin-top:4px">Opening ${GHS(tOpen)} + Credits ${GHS(tc)} \u2212 Debits ${GHS(td)}</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:11px;color:#64748b;margin-bottom:8px">Teller Signature: ________________________</div>
+    <div style="font-size:11px;color:#64748b;margin-bottom:8px">Supervisor Signature: ________________________</div>
+    <div style="font-size:11px;color:#64748b">Date: ________________________</div>
+  </div>
+</div>
+<div class="footer">
+  <span>Majupat Love Enterprise &mdash; ${teller.name} &mdash; ${dateFrom} to ${dateTo}</span>
+  <span>Printed: ${new Date().toLocaleString()}</span>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`);
+    win.document.close();
+  };
   const handleExportCSV = () => {
     exportCSV(filtered.map(t => {
-      const acc = accounts.find(a => a.id === t.accountId);
+      const acc  = accounts.find(a => a.id === t.accountId);
       const cust = customers.find(c => c.id === (acc?.customerId || acc?.customer_id));
       return {
-        Time: fmtTime(t.createdAt), Date: t.createdAt?.slice(0,10),
+        Time: fmtTime(t.createdAt), Date: t.createdAt?.slice(0, 10),
         Reference: t.reference,
-        Account: acc?.accountNumber || acc?.account_number || '\u2014',
-        Customer: cust?.name || '\u2014',
+        Account: acc?.accountNumber || acc?.account_number || '—',
+        Customer: cust?.name || '—',
         Narration: t.narration,
         Type: t.type, Amount: t.amount,
         BalanceAfter: t.balanceAfter,
-        Teller: t.posterName || '\u2014',
-        Phone: t.posterPhone || '\u2014',
+        Teller: t.posterName || '—',
+        Phone: t.posterPhone || '—',
         Channel: t.channel || 'teller',
         Reversed: t.reversed ? 'Yes' : 'No',
       };
@@ -207,7 +265,7 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
           <div className="page-desc">
             {tellerFilter !== 'all'
               ? `Report for: ${tellerFilter} · ${dateFrom === dateTo ? fmtDate(dateFrom) : `${fmtDate(dateFrom)} — ${fmtDate(dateTo)}`}`
-              : 'Select a teller to generate their individual report'}
+              : 'Select a teller or print all'}
           </div>
         </div>
         <div className="page-header-right">
@@ -231,11 +289,15 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
                 onChange={e => setDateTo(e.target.value)} style={{ width: 150 }} />
             </div>
             <div style={{ minWidth: 220 }}>
-              <label className="form-label">Teller <span style={{ color: 'var(--red)' }}>*</span></label>
+              <label className="form-label">Teller</label>
               <select className="form-control" value={tellerFilter} onChange={e => setTellerFilter(e.target.value)}
-                style={{ borderColor: tellerFilter === 'all' ? 'var(--yellow)' : 'var(--brand)', fontWeight: tellerFilter !== 'all' ? 700 : 400 }}>
-                <option value="all">— Select a Teller —</option>
-                {tellers.map(t => <option key={t.name} value={t.name}>{t.name}{t.phone ? ` (${t.phone})` : ''}</option>)}
+                style={{ borderColor: tellerFilter !== 'all' ? 'var(--brand)' : undefined, fontWeight: tellerFilter !== 'all' ? 700 : 400 }}>
+                <option value="all">All Tellers</option>
+                {tellers.map(t => (
+                  <option key={t.id || t.name} value={t.name}>
+                    {t.name}{t.phone ? ` (${t.phone})` : ''}
+                  </option>
+                ))}
               </select>
             </div>
             <div style={{ minWidth: 160 }}>
@@ -255,11 +317,6 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
               </label>
             </div>
           </div>
-          {tellerFilter === 'all' && (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#92400e', background: '#fef9c3', padding: '6px 12px', borderRadius: 6, display: 'inline-block' }}>
-              ⚠️ Select a specific teller to generate their individual report
-            </div>
-          )}
         </div>
       </div>
 
@@ -267,8 +324,8 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
         {[
           { label: 'Opening Balance', value: GHS(openingBalance), color: '#1a56db', bg: '#eff6ff' },
-          { label: 'Total Credits',   value: GHS(totalCredits),   color: '#16a34a', bg: '#f0fdf4', sub: `${filtered.filter(t=>t.type==='credit').length} txns` },
-          { label: 'Total Debits',    value: GHS(totalDebits),    color: '#dc2626', bg: '#fef2f2', sub: `${filtered.filter(t=>t.type==='debit').length} txns` },
+          { label: 'Total Credits',   value: GHS(totalCredits),   color: '#16a34a', bg: '#f0fdf4', sub: `${filtered.filter(t => t.type === 'credit').length} txns` },
+          { label: 'Total Debits',    value: GHS(totalDebits),    color: '#dc2626', bg: '#fef2f2', sub: `${filtered.filter(t => t.type === 'debit').length} txns` },
           { label: 'Net Cash',        value: GHS(netCash),        color: netCash >= 0 ? '#16a34a' : '#dc2626', bg: netCash >= 0 ? '#f0fdf4' : '#fef2f2' },
           { label: 'Closing Balance', value: GHS(closingBalance), color: '#0f172a', bg: '#f1f5f9', bold: true },
           { label: 'Transactions',    value: filtered.length,     color: '#7c3aed', bg: '#f5f3ff', sub: `${byTeller.length} teller(s)` },
@@ -291,12 +348,14 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 11, color: '#475569', marginBottom: 6 }}>Period: {dateFrom === dateTo ? fmtDate(dateFrom) : `${fmtDate(dateFrom)} \u2014 ${fmtDate(dateTo)}`}</div>
+          <div style={{ fontSize: 11, color: '#475569', marginBottom: 6 }}>
+            Period: {dateFrom === dateTo ? fmtDate(dateFrom) : `${fmtDate(dateFrom)} \u2014 ${fmtDate(dateTo)}`}
+          </div>
           <div style={{ fontSize: 11, color: '#475569' }}>{filtered.length} transactions &nbsp;|&nbsp; {byTeller.length} teller(s)</div>
         </div>
       </div>
 
-      {/* Per-Teller Breakdown */}
+      {/* Per-Teller Breakdown with individual print buttons */}
       {byTeller.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header"><div className="card-title">Teller Breakdown</div></div>
@@ -304,22 +363,33 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
             <table>
               <thead>
                 <tr>
-                  <th>Teller</th><th>Phone</th>
+                  <th>Teller</th>
+                  <th>Phone</th>
                   <th style={{ textAlign: 'right' }}>Credits</th>
                   <th style={{ textAlign: 'right' }}>Debits</th>
                   <th style={{ textAlign: 'right' }}>Net</th>
                   <th style={{ textAlign: 'center' }}>Transactions</th>
+                  <th style={{ textAlign: 'center' }}>Print</th>
                 </tr>
               </thead>
               <tbody>
                 {byTeller.map(t => (
                   <tr key={t.name}>
-                    <td style={{ fontWeight: 700 }}><User size={13} style={{ marginRight: 6, color: 'var(--text-3)' }} />{t.name}</td>
+                    <td style={{ fontWeight: 700 }}>
+                      <User size={13} style={{ marginRight: 6, color: 'var(--text-3)' }} />{t.name}
+                    </td>
                     <td style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'monospace' }}>{t.phone || '\u2014'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>{GHS(t.credits)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--red)' }}>{GHS(t.debits)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: (t.credits - t.debits) >= 0 ? 'var(--green)' : 'var(--red)' }}>{GHS(t.credits - t.debits)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: (t.credits - t.debits) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {GHS(t.credits - t.debits)}
+                    </td>
                     <td style={{ textAlign: 'center' }}>{t.count}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => printTellerSheet(t)} title={`Print ${t.name}'s sheet`}>
+                        <Printer size={13} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 <tr style={{ background: 'var(--surface-2)', fontWeight: 800 }}>
@@ -328,6 +398,7 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
                   <td style={{ textAlign: 'right', color: 'var(--red)' }}>{GHS(totalDebits)}</td>
                   <td style={{ textAlign: 'right', color: netCash >= 0 ? 'var(--green)' : 'var(--red)' }}>{GHS(netCash)}</td>
                   <td style={{ textAlign: 'center' }}>{filtered.length}</td>
+                  <td />
                 </tr>
               </tbody>
             </table>
@@ -360,7 +431,7 @@ ${byTeller.length > 1 ? `<div class="section-title">Teller Breakdown</div>
               {filtered.length === 0 ? (
                 <tr><td colSpan={11} className="table-empty"><AlertCircle size={14} /> No transactions found</td></tr>
               ) : filtered.map((t, idx) => {
-                const acc = accounts.find(a => a.id === t.accountId);
+                const acc  = accounts.find(a => a.id === t.accountId);
                 const cust = customers.find(c => c.id === (acc?.customerId || acc?.customer_id));
                 return (
                   <tr key={t.id} style={{ opacity: t.reversed ? 0.5 : 1, background: idx % 2 === 0 ? '#fff' : 'var(--surface)' }}>

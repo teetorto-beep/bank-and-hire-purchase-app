@@ -93,18 +93,13 @@ export default function Statement() {
         return (!from || d >= from) && (!to || d <= to);
       });
 
-      // Separate savings txns from loan/HP repayments
-      // Rules:
-      // - Collector DEBIT (channel=collection): loan/HP cash payment — does NOT affect account balance
-      // - Loan offset (narration=loan offset, channel=teller): DOES affect account balance AND reduces loan
-      // - HP/Loan repayment via teller (loanId/hpId set, channel=teller): DOES affect account balance
-      // - Savings deposits (credit): always in main list
+      // ── Classify transactions ─────────────────────────────────────────────
+      // Collector cash payments (debit + channel=collection) do NOT affect
+      // the account balance — cash is collected in the field, not from account.
       const isCollectorCashPayment = (t) =>
         t.type === 'debit' && t.channel === 'collection';
 
-      const isLoanTxn = (t) => isCollectorCashPayment(t); // only collector cash doesn't affect balance
-
-      // Loan transactions for the loan section = collector cash + teller loan payments + offsets
+      // Loan-related = collector cash + any teller loan/HP/offset transactions
       const isLoanRelated = (t) =>
         isCollectorCashPayment(t) ||
         (t.narration || '').toLowerCase().includes('loan repayment') ||
@@ -113,33 +108,35 @@ export default function Statement() {
         !!(t.loanId || t.loan_id) ||
         !!(t.hpAgreementId || t.hp_agreement_id);
 
-      const savingsTxns = periodTxns.filter(t => !isLoanTxn(t));
-      const loanTxns    = periodTxns.filter(t =>  isLoanRelated(t));
+      // ALL period transactions go into the main statement table
+      const loanTxns = periodTxns.filter(t => isLoanRelated(t));
+
+      // ALL-time loan-related txns for the account (for accurate repayment totals)
+      const allLoanTxns = acctTxns.filter(t => isLoanRelated(t));
 
       // ── Compute opening balance reliably ──────────────────────────────────
-      // Work backwards from current account balance using ALL transactions
-      // after the period end — this avoids relying on stored balance_after
-      // which may be stale/wrong from old transactions.
       const currentBalance = Number(selectedAccount.balance || 0);
       const txnsAfterPeriod = acctTxns.filter(t => {
         if (!to) return false;
         return new Date(t.createdAt) > to;
       });
-      // Reverse the effect of transactions after the period to get closing balance
       let closingBalance = currentBalance;
       for (const t of txnsAfterPeriod) {
-        if (isLoanTxn(t)) continue; // loan txns don't affect account balance
+        if (isCollectorCashPayment(t)) continue;
         if (t.type === 'credit') closingBalance -= t.amount;
         else closingBalance += t.amount;
       }
 
-      const totalCredits = savingsTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-      const totalDebits  = savingsTxns.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+      const totalCredits = periodTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+      const totalDebits  = periodTxns.filter(t => t.type === 'debit' && !isCollectorCashPayment(t)).reduce((s, t) => s + t.amount, 0);
       const openingBalance = closingBalance - totalCredits + totalDebits;
 
-      // Recompute running balance for each savings transaction
+      // Recompute running balance for ALL transactions in order
       let runningBal = openingBalance;
-      const savingsTxnsWithBal = savingsTxns.map(t => {
+      const allTxnsWithBal = periodTxns.map(t => {
+        if (isCollectorCashPayment(t)) {
+          return { ...t, computedBalance: runningBal, balanceUnchanged: true };
+        }
         if (t.type === 'credit') runningBal += t.amount;
         else runningBal -= t.amount;
         return { ...t, computedBalance: runningBal };
@@ -158,8 +155,9 @@ export default function Statement() {
         customer: selectedCustomer,
         dateFrom, dateTo,
         generatedAt: new Date().toISOString(),
-        transactions: savingsTxnsWithBal,
+        transactions: allTxnsWithBal,
         loanTransactions: loanTxns,
+        allLoanTxns,           // all-time for repayment totals
         acctLoans,
         acctHP,
         openingBalance, totalCredits, totalDebits, closingBalance,
@@ -483,15 +481,16 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     <td style={{ padding: '9px 12px', color: '#0f172a', maxWidth: 260 }}>
                       {t.narration || '\u2014'}
                       {t.reversed && <span style={{ fontSize: 9, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>REVERSED</span>}
+                      {t.balanceUnchanged && <span style={{ fontSize: 9, background: '#eff6ff', color: '#1d4ed8', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>COLLECTION</span>}
                     </td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: '#dc2626', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: t.balanceUnchanged ? '#94a3b8' : '#dc2626', whiteSpace: 'nowrap' }}>
                       {t.type === 'debit' ? Number(t.amount).toLocaleString('en-GH', { minimumFractionDigits: 2 }) : ''}
                     </td>
                     <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: '#16a34a', whiteSpace: 'nowrap' }}>
                       {t.type === 'credit' ? Number(t.amount).toLocaleString('en-GH', { minimumFractionDigits: 2 }) : ''}
                     </td>
-                    <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                      {Number(t.computedBalance ?? t.balanceAfter ?? 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
+                    <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 600, color: t.balanceUnchanged ? '#94a3b8' : '#0f172a', whiteSpace: 'nowrap' }}>
+                      {t.balanceUnchanged ? '—' : Number(t.computedBalance ?? t.balanceAfter ?? 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
                     </td>
                   </tr>
                 ))}
@@ -519,12 +518,30 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                 const tenure  = Number(loan.tenure || 0);
                 const principal = Number(loan.amount || 0);
                 const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : principal;
-                // Repayments that belong to THIS specific loan
-                const thisLoanTxns = (statement.loanTransactions || []).filter(t =>
-                  t.loan_id === loan.id || t.loanId === loan.id ||
-                  t.hp_agreement_id === loan.hpAgreementId || t.hpAgreementId === loan.hpAgreementId
-                );
-                const totalRepaid = thisLoanTxns.reduce((s, t) => s + Number(t.amount || 0), 0);
+
+                // Match repayments to this loan using ALL-time txns:
+                // 1. Direct loan_id match
+                // 2. hp_agreement_id matches loan's hpAgreementId
+                // 3. Collector debits (no loan_id stored) matched by narration containing item name
+                const itemNameLower = (loan.itemName || '').toLowerCase();
+                const allRepayTxns = (statement.allLoanTxns || statement.loanTransactions || []).filter(t => {
+                  if (t.loanId === loan.id || t.loan_id === loan.id) return true;
+                  if (loan.hpAgreementId && (t.hpAgreementId === loan.hpAgreementId || t.hp_agreement_id === loan.hpAgreementId)) return true;
+                  // Collector transactions often have no loan_id — match by item name in narration
+                  if (itemNameLower && (t.narration || '').toLowerCase().includes(itemNameLower)) return true;
+                  return false;
+                });
+
+                // Period repayments for the repayment table
+                const periodFrom = statement.dateFrom ? new Date(statement.dateFrom + 'T00:00:00') : null;
+                const periodTo   = statement.dateTo   ? new Date(statement.dateTo   + 'T23:59:59') : null;
+                const thisLoanTxns = allRepayTxns.filter(t => {
+                  const d = new Date(t.createdAt);
+                  return (!periodFrom || d >= periodFrom) && (!periodTo || d <= periodTo);
+                });
+
+                // Total repaid = use loan's own outstanding vs principal, or sum all-time txns
+                const totalRepaid = allRepayTxns.reduce((s, t) => s + Number(t.amount || 0), 0);
 
                 return (
                   <div key={loan.id} style={{ marginBottom: lIdx < statement.acctLoans.length - 1 ? 24 : 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
@@ -549,7 +566,7 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                         ['Rate',            `${loan.interestRate}%`,                       '#475569'],
                         ['Monthly',         GHS(monthly),                                  '#1d4ed8'],
                         ['Total Repayable', GHS(totalRepay),                               '#1d4ed8'],
-                        ['Total Repaid',    GHS(totalRepaid),                              '#16a34a'],
+                        ['Total Repaid',    GHS(Math.max(0, principal - Number(loan.outstanding || 0))), '#16a34a'],
                         ['Outstanding',     GHS(loan.outstanding),                         Number(loan.outstanding) > 0 ? '#dc2626' : '#16a34a'],
                       ].map(([k, v, col], i) => (
                         <div key={k} style={{ padding: '10px 14px', borderRight: i < 5 ? '1px solid #fde68a' : 'none', borderTop: '1px solid #fde68a' }}>
@@ -562,14 +579,17 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     {/* This loan's repayments */}
                     {thisLoanTxns.length > 0 && (
                       <div style={{ borderTop: '1px solid #fde68a' }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', padding: '8px 14px', background: '#fef9c3' }}>
-                          Repayments ({thisLoanTxns.length}) — Total: {GHS(totalRepaid)}
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', padding: '8px 14px', background: '#fef9c3', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Repayments in Period ({thisLoanTxns.length}) — {GHS(thisLoanTxns.reduce((s,t)=>s+Number(t.amount||0),0))}</span>
+                          {allRepayTxns.length > thisLoanTxns.length && (
+                            <span style={{ color: '#64748b', fontWeight: 400 }}>All-time: {GHS(totalRepaid)} ({allRepayTxns.length} payments)</span>
+                          )}
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                           <thead>
                             <tr style={{ background: '#f1f5f9' }}>
-                              {['Date', 'Reference', 'Description', 'Amount Paid'].map((h, i) => (
-                                <th key={h} style={{ padding: '6px 10px', textAlign: i === 3 ? 'right' : 'left', fontSize: 10, color: '#64748b', fontWeight: 700 }}>{h}</th>
+                              {['Date', 'Reference', 'Description', 'Via', 'Amount Paid'].map((h, i) => (
+                                <th key={h} style={{ padding: '6px 10px', textAlign: i === 4 ? 'right' : 'left', fontSize: 10, color: '#64748b', fontWeight: 700 }}>{h}</th>
                               ))}
                             </tr>
                           </thead>
@@ -579,6 +599,11 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                                 <td style={{ padding: '6px 10px', color: '#64748b' }}>{fmtDate(t.createdAt)}</td>
                                 <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 10 }}>{t.reference}</td>
                                 <td style={{ padding: '6px 10px' }}>{t.narration}</td>
+                                <td style={{ padding: '6px 10px' }}>
+                                  <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 10, fontWeight: 700, background: t.channel === 'collection' ? '#eff6ff' : '#f0fdf4', color: t.channel === 'collection' ? '#1d4ed8' : '#15803d' }}>
+                                    {t.channel === 'collection' ? 'Collector' : 'Teller'}
+                                  </span>
+                                </td>
                                 <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(t.amount)}</td>
                               </tr>
                             ))}
@@ -589,6 +614,7 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     {thisLoanTxns.length === 0 && (
                       <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8', borderTop: '1px solid #fde68a', background: '#fff' }}>
                         No repayments in selected period
+                        {allRepayTxns.length > 0 && <span style={{ color: '#92400e', marginLeft: 8 }}>({allRepayTxns.length} payment(s) outside this period — total {GHS(totalRepaid)})</span>}
                       </div>
                     )}
                   </div>

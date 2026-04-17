@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
-  authDB, customersDB, accountsDB, transactionsDB, pendingDB,
+  authDB, usersDB, customersDB, accountsDB, transactionsDB, pendingDB,
   loansDB, productsDB, hpItemsDB, hpAgreementsDB, hpPaymentsDB,
   collectorsDB, collectionsDB, deductionRulesDB, auditDB, approvalsDB,
   transfersDB,
@@ -32,16 +32,17 @@ export function AppProvider({ children }) {
   const [deductionRules, setDeductionRules] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [users, setUsers] = useState([]);
 
   const silentRefresh = useCallback(async () => {
     const [
-      c, a, t, l, col, cols, p, hi, ha, hp, pt, dr, al, pa
+      c, a, t, l, col, cols, p, hi, ha, hp, pt, dr, al, pa, u
     ] = await Promise.all([
       customersDB.getAll(), accountsDB.getAll(), transactionsDB.getAll(),
       loansDB.getAll(), collectorsDB.getAll(), collectionsDB.getAll(),
       productsDB.getAll(), hpItemsDB.getAll(), hpAgreementsDB.getAll(),
       hpPaymentsDB.getAll(), pendingDB.getAll(), deductionRulesDB.getAll(),
-      auditDB.getAll(), approvalsDB.getAll(),
+      auditDB.getAll(), approvalsDB.getAll(), usersDB.getAll(),
     ]);
     setCustomers((c.data || []).map(normCustomer));
     setAccounts((a.data || []).map(normAccount));
@@ -57,6 +58,7 @@ export function AppProvider({ children }) {
     setDeductionRules(dr.data || []);
     setAuditLog(al.data || []);
     setPendingApprovals((pa?.data || []).map(normPendingApproval));
+    setUsers(u.data || []);
     setLastRefresh(new Date());
   }, []);
 
@@ -113,9 +115,12 @@ export function AppProvider({ children }) {
     // transactions → update list + refresh the affected account balance
     sub('transactions', async ({ eventType, new: row, old }) => {
       if (eventType === 'INSERT' && row) {
+        // Re-fetch with joins so customerName, accountNumber etc. are populated
+        const { data: full } = await transactionsDB.getById(row.id);
+        const txn = full ? normTransaction(full) : normTransaction(row);
         setTransactions(p => {
           if (p.find(t => t.id === row.id)) return p;
-          return [normTransaction(row), ...p];
+          return [txn, ...p];
         });
         if (row.account_id) {
           const { data: acc } = await accountsDB.getById(row.account_id);
@@ -123,7 +128,8 @@ export function AppProvider({ children }) {
         }
       }
       if (eventType === 'UPDATE' && row) {
-        setTransactions(p => p.map(t => t.id === row.id ? normTransaction(row) : t));
+        const { data: full } = await transactionsDB.getById(row.id);
+        setTransactions(p => p.map(t => t.id === row.id ? (full ? normTransaction(full) : normTransaction(row)) : t));
       }
       if (eventType === 'DELETE' && old) {
         setTransactions(p => p.filter(t => t.id !== old.id));
@@ -416,7 +422,7 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       loading, lastRefresh, customers, accounts, transactions, loans, collectors, collections,
       products, hpItems, hpAgreements, hpPayments, pendingTxns, deductionRules, auditLog,
-      pendingApprovals,
+      pendingApprovals, users,
       stats, refresh,
       addCustomer, updateCustomer,
       openAccount, updateAccount,

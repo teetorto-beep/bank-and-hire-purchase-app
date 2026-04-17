@@ -57,6 +57,7 @@ export const normTransaction = (t) => !t ? null : {
   ...t,
   id: t.id,
   accountId: t.account_id || t.accountId || '',
+  customerId: t.accounts?.customer_id || t.customer_id || t.customerId || '',
   type: t.type || '',
   amount: Number(t.amount ?? 0),
   narration: t.narration || '',

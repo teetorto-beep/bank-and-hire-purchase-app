@@ -35,8 +35,9 @@ export default function CustomerDetail() {
     payments: hpPayments.filter(p => p.agreementId === a.id),
     progress: a.totalPrice > 0 ? Math.min(100, ((a.totalPaid || 0) / a.totalPrice) * 100) : 0,
   }));
-  const custTxns = transactions.filter(t => custAccounts.some(a => a.id === t.accountId))
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10);
+  const custTxns = transactions
+    .filter(t => custAccounts.some(a => a.id === t.accountId) || (t.customerId && t.customerId === id))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 20);
 
   const age = customer.dob ? Math.floor((Date.now() - new Date(customer.dob)) / (365.25 * 86400000)) : null;
   // Standalone loans (not linked to HP)
