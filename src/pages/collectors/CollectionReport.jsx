@@ -538,7 +538,8 @@ export default function CollectionReport() {
                         const types = [...new Set(cust.collections.map(c => c.paymentType))];
                         const lastDate = cust.collections.sort((a, b) => b.createdAt > a.createdAt ? 1 : -1)[0]?.createdAt;
                         return (
-                          <tr key={cust.customerId || idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <React.Fragment key={cust.customerId || idx}>
+                            <tr style={{ borderBottom: cust.collections.length > 0 ? 'none' : '1px solid var(--border)', background: '#f8fafc' }}>
                             <td style={{ padding: '8px 10px', color: 'var(--text-3)', fontSize: 12 }}>{idx + 1}</td>
                             <td style={{ padding: '8px 10px', fontWeight: 700 }}>{cust.customerName}</td>
                             <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: 12 }}>{acc?.accountNumber || acc?.account_number || '—'}</td>
@@ -563,6 +564,26 @@ export default function CollectionReport() {
                               {lastDate ? new Date(lastDate).toLocaleString() : '—'}
                             </td>
                           </tr>
+                          {/* Individual transactions for this customer */}
+                          {cust.collections.sort((a, b) => a.createdAt > b.createdAt ? 1 : -1).map((c, ci) => (
+                            <tr key={c.id} style={{ borderBottom: ci === cust.collections.length - 1 ? '2px solid var(--border)' : '1px solid #f1f5f9', background: ci % 2 === 0 ? '#fff' : '#fafafa' }}>
+                              <td style={{ padding: '6px 10px 6px 24px', color: 'var(--text-4)', fontSize: 11 }}>↳</td>
+                              <td style={{ padding: '6px 10px', fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                                {c.createdAt ? new Date(c.createdAt).toLocaleString('en-GH') : '—'}
+                              </td>
+                              <td colSpan={2} style={{ padding: '6px 10px', fontSize: 11, color: 'var(--text-2)' }}>
+                                {c.notes || (c.paymentType === 'savings' ? 'Savings Deposit' : c.paymentType === 'loan' ? 'Loan Repayment' : 'HP Repayment')}
+                              </td>
+                              <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                <span className={`badge ${c.paymentType === 'savings' ? 'badge-green' : c.paymentType === 'loan' ? 'badge-blue' : 'badge-purple'}`} style={{ fontSize: 10 }}>
+                                  {c.paymentType === 'savings' ? 'Savings' : c.paymentType === 'loan' ? 'Loan' : 'HP'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--green)', fontSize: 12 }}>{GHS(c.amount)}</td>
+                              <td colSpan={3} />
+                            </tr>
+                          ))}
+                          </React.Fragment>
                         );
                       })}
                       {/* Totals row */}
