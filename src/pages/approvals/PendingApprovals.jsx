@@ -46,15 +46,14 @@ function getDetails(item) {
   const p = item.payload || {};
   if (item._source === 'pending_txn') {
     return [
-      ['Account',   item.accountNumber || p.accountId || '—'],
+      ['Account',   item.accountNumber || item.account_id || p.accountId || '—'],
       ['Customer',  item.customerName  || '—'],
       ['Amount',    GHS(item.amount || p.amount || 0)],
       ['Narration', item.narration || p.narration || '—'],
       ['Channel',   item.channel   || p.channel   || 'teller'],
       ['Type',      item.type || '—'],
     ];
-  }
-  if (item.type === 'customer') return [['Name', p.name], ['Phone', p.phone], ['Email', p.email || '—'], ['Ghana Card', p.ghana_card || p.ghanaCard || '—']];
+  }  if (item.type === 'customer') return [['Name', p.name], ['Phone', p.phone], ['Email', p.email || '—'], ['Ghana Card', p.ghana_card || p.ghanaCard || '—']];
   if (item.type === 'account')  return [['Customer', p.customerName || p.name], ['Account Type', (p.type || p.category || '').replace(/_/g,' ')], ['Interest Rate', `${p.interestRate ?? p.interest_rate ?? 0}%`], ['Initial Deposit', p.initialDeposit ? GHS(p.initialDeposit) : 'None']];
   if (item.type === 'collection') return [['Customer', p.customerName], ['Account', p.accountId || '—'], ['Amount', GHS(p.amount)], ['Payment Type', p.paymentType || 'savings'], ['Collector', p.collectorName || '—']];
   if (item.type === 'transaction') return [['Account', p.accountId || '—'], ['Type', p.type], ['Amount', GHS(p.amount)], ['Narration', p.narration || '—']];
@@ -62,7 +61,7 @@ function getDetails(item) {
 }
 
 export default function PendingApprovals() {
-  const { pendingApprovals, pendingTxns, approveApproval, rejectApproval, approvePendingTxn, rejectPendingTxn, refresh } = useApp();
+  const { pendingApprovals, pendingTxns, accounts, customers, approveApproval, rejectApproval, approvePendingTxn, rejectPendingTxn, refresh } = useApp();
   const user = authDB.currentUser();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
@@ -76,27 +75,34 @@ export default function PendingApprovals() {
   // Merge both approval sources into one unified list
   const allItems = useMemo(() => {
     const fromApprovals = (pendingApprovals || []).map(a => ({ ...a, _source: 'approval' }));
-    const fromPending   = (pendingTxns || []).map(t => ({
-      ...t,
-      _source:        'pending_txn',
-      type:           t.type || 'credit',
-      // normalize field names — pendingTxns uses camelCase after normPendingTxn
-      submitted_at:   t.submittedAt || t.submitted_at || t.createdAt || '',
-      submitter_name: t.submitterName || t.submitter_name || '—',
-      submitted_by:   t.submittedBy  || t.submitted_by  || '',
-      approver_name:  t.approverName || t.approver_name || '',
-      rejector_name:  t.rejectorName || t.rejector_name || '',
-      payload: {
-        amount:    t.amount,
-        narration: t.narration,
-        type:      t.type,
-        accountId: t.accountId,
-        channel:   t.channel,
-      },
-    }));
+    const fromPending   = (pendingTxns || []).map(t => {
+      // Enrich with account/customer from already-loaded context state
+      const acc  = (accounts  || []).find(a => a.id === (t.accountId || t.account_id));
+      const cust = acc ? (customers || []).find(c => c.id === (acc.customerId || acc.customer_id)) : null;
+      return {
+        ...t,
+        _source:        'pending_txn',
+        type:           t.type || 'credit',
+        submitted_at:   t.submittedAt || t.submitted_at || t.createdAt || '',
+        submitter_name: t.submitterName || t.submitter_name || '—',
+        submitted_by:   t.submittedBy  || t.submitted_by  || '',
+        approver_name:  t.approverName || t.approver_name || '',
+        rejector_name:  t.rejectorName || t.rejector_name || '',
+        // enrich display fields
+        accountNumber:  t.accountNumber || acc?.accountNumber || acc?.account_number || t.accountId || '—',
+        customerName:   t.customerName  || cust?.name || '—',
+        payload: {
+          amount:    t.amount,
+          narration: t.narration,
+          type:      t.type,
+          accountId: t.accountId || t.account_id,
+          channel:   t.channel,
+        },
+      };
+    });
     return [...fromApprovals, ...fromPending]
       .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
-  }, [pendingApprovals, pendingTxns]);
+  }, [pendingApprovals, pendingTxns, accounts, customers]);
 
   const filtered = useMemo(() => {
     return allItems.filter(item => {
@@ -156,6 +162,14 @@ export default function PendingApprovals() {
           <button className="btn btn-ghost btn-sm" onClick={refresh}><RefreshCw size={14} /> Refresh</button>
         </div>
       </div>
+
+      {/* Warning banner when DB returns nothing — likely RLS not fixed yet */}
+      {allItems.length === 0 && (pendingTxns||[]).length === 0 && (pendingApprovals||[]).length === 0 && (
+        <div className="alert alert-warning" style={{ marginBottom: 16 }}>
+          <AlertCircle size={14} />
+          <span>No data found. If you have submitted transactions, run <strong>supabase/fix_approvals_complete.sql</strong> in your Supabase SQL Editor to fix database permissions, then click Refresh.</span>
+        </div>
+      )}
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>

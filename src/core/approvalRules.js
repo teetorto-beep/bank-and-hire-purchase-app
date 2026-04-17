@@ -8,8 +8,8 @@ import { supabase } from './supabase';
 const CACHE_KEY = 'approval_rules_cache';
 
 export const DEFAULT_RULES = {
-  credit_threshold:   { enabled: true,  amount: 10000, roles: ['teller'] },
-  debit_threshold:    { enabled: true,  amount: 5000,  roles: ['teller'] },
+  credit_threshold:   { enabled: true,  amount: 10000, roles: ['teller', 'collector'] },
+  debit_threshold:    { enabled: true,  amount: 5000,  roles: ['teller', 'collector'] },
   transfer_threshold: { enabled: true,  amount: 5000,  roles: ['teller', 'manager'] },
   account_opening:    { enabled: false, roles: ['teller'] },
   loan_creation:      { enabled: true,  roles: ['teller'] },

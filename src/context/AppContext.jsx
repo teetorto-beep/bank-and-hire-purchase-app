@@ -44,6 +44,9 @@ export function AppProvider({ children }) {
       hpPaymentsDB.getAll(), pendingDB.getAll(), deductionRulesDB.getAll(),
       auditDB.getAll(), approvalsDB.getAll(), usersDB.getAll(),
     ]);
+    // Log any query errors so they're visible in the browser console
+    if (pt.error) console.error('[AppContext] pending_transactions error:', pt.error);
+    if (pa?.error) console.error('[AppContext] pending_approvals error:', pa?.error);
     setCustomers((c.data || []).map(normCustomer));
     setAccounts((a.data || []).map(normAccount));
     setTransactions((t.data || []).map(normTransaction));

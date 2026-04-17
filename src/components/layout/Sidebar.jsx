@@ -7,6 +7,7 @@ import {
   Receipt, Package, ShoppingBag, UserCog, Clock, Eye, BookOpen, CheckCircle, Monitor
 } from 'lucide-react';
 import { authDB } from '../../core/db';
+import { useApp } from '../../context/AppContext';
 
 const NAV = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
@@ -112,6 +113,7 @@ export default function Sidebar({ user, onLogout, mobileOpen, onClose }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState({});
+  const { pendingTxns, pendingApprovals } = useApp();
 
   const isActive = (path) => location.pathname === path;
   const isGroupActive = (children) => children?.some(c => location.pathname.startsWith(c.path));
@@ -121,7 +123,16 @@ export default function Sidebar({ user, onLogout, mobileOpen, onClose }) {
   const handleLogout = () => { authDB.logout(); onLogout(); };
   const handleNav = (path) => { navigate(path); onClose?.(); };
 
-  const pendingCount = 0;
+  // For admin/manager: total pending needing action (not their own)
+  // For teller: their own pending submissions
+  const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+  const myPendingTxns = (pendingTxns || []).filter(t =>
+    t.status === 'pending' && (isAdmin ? t.submittedBy !== user?.id : t.submittedBy === user?.id)
+  );
+  const myPendingApprovals = (pendingApprovals || []).filter(a =>
+    a.status === 'pending' && (isAdmin ? (a.submittedBy || a.submitted_by) !== user?.id : (a.submittedBy || a.submitted_by) === user?.id)
+  );
+  const pendingCount = myPendingTxns.length + myPendingApprovals.length;
 
   return (
     <aside className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}>

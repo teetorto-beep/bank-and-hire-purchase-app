@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { authDB } from '../../core/db';
-import { Search, Printer, Download, CheckCircle, AlertCircle, TrendingUp, DollarSign, BookOpen, Monitor } from 'lucide-react';
+import { Search, Printer, Download, CheckCircle, AlertCircle, TrendingUp, DollarSign, BookOpen, Monitor, Clock } from 'lucide-react';
 import { exportCSV } from '../../core/export';
 import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
 
@@ -55,7 +55,7 @@ function printReceipt({ ref, account, customer, type, amount, balanceAfter, tell
 }
 
 export default function TellerSession() {
-  const { accounts, customers, transactions, postTransaction, glTransfer, submitForApproval } = useApp();
+  const { accounts, customers, transactions, pendingTxns, postTransaction, glTransfer, submitForApproval } = useApp();
   const currentUser = authDB.currentUser();
 
   const [tab, setTab] = useState('post');
@@ -159,7 +159,14 @@ export default function TellerSession() {
     });
   }, [transactions, currentUser, today]);
 
-  // --- Handlers ---
+  // My pending submissions (teller's own)
+  const myPending = useMemo(() =>
+    (pendingTxns || [])
+      .filter(t => t.submittedBy === currentUser?.id || t.submitter_name === currentUser?.name)
+      .sort((a, b) => new Date(b.submittedAt || b.submitted_at || 0) - new Date(a.submittedAt || a.submitted_at || 0)),
+    [pendingTxns, currentUser]
+  );
+  const myPendingCount = myPending.filter(t => t.status === 'pending').length;
   const handlePost = async (e) => {
     e.preventDefault();
     if (!selAcc) return setPostError('Select an account first.');
@@ -394,6 +401,7 @@ export default function TellerSession() {
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '2px solid #1e293b' }}>
         {[
           { key: 'post',    label: 'Post Transaction' },
+          { key: 'pending', label: 'My Pending', badge: myPendingCount },
           { key: 'history', label: 'My History' },
           { key: 'report',  label: 'My Report' },
           { key: 'closing', label: 'Closing Entry' },
@@ -411,8 +419,14 @@ export default function TellerSession() {
               borderBottom: tab === t.key ? '2px solid var(--primary, #1a56db)' : '2px solid transparent',
               marginBottom: -2,
               fontSize: 14,
+              display: 'flex', alignItems: 'center', gap: 6,
             }}
-          >{t.label}</button>
+          >
+            {t.label}
+            {t.badge > 0 && (
+              <span style={{ background: '#ef4444', color: '#fff', borderRadius: 10, fontSize: 10, fontWeight: 700, padding: '1px 6px', minWidth: 18, textAlign: 'center' }}>{t.badge}</span>
+            )}
+          </button>
         ))}
       </div>
 
@@ -599,6 +613,89 @@ export default function TellerSession() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ===== MY PENDING TAB ===== */}
+      {tab === 'pending' && (
+        <div>
+          <div className="card" style={{ marginBottom: 16, padding: '14px 20px', background: '#fef9c3', border: '1px solid #fde68a' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#92400e' }}>
+              <Clock size={14} />
+              <span>These are your submitted transactions awaiting manager approval. You cannot approve your own submissions.</span>
+            </div>
+          </div>
+
+          {myPending.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: 48 }}>
+              <CheckCircle size={40} style={{ color: '#22c55e', margin: '0 auto 12px', display: 'block' }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>All clear</div>
+              <div style={{ color: '#64748b', fontSize: 13, marginTop: 4 }}>No pending submissions</div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Submitted</th>
+                      <th>Account</th>
+                      <th>Type</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      <th>Narration</th>
+                      <th>Status</th>
+                      <th>Actioned By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myPending.map(t => {
+                      const submittedAt = t.submittedAt || t.submitted_at || '';
+                      const status = t.status || 'pending';
+                      const statusStyle = {
+                        pending:  { background: '#fef9c3', color: '#92400e' },
+                        approved: { background: '#d1fae5', color: '#065f46' },
+                        rejected: { background: '#fee2e2', color: '#991b1b' },
+                      }[status] || {};
+                      return (
+                        <tr key={t.id}>
+                          <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                            {submittedAt ? new Date(submittedAt).toLocaleString() : '—'}
+                          </td>
+                          <td style={{ fontFamily: 'monospace', fontSize: 13 }}>
+                            {t.accountNumber || t.account_number || t.accountId || '—'}
+                          </td>
+                          <td>
+                            <span className={`badge ${t.type === 'credit' ? 'badge-green' : 'badge-red'}`}>
+                              {t.type?.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>{GHS(t.amount)}</td>
+                          <td style={{ fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {t.narration || '—'}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, ...statusStyle }}>
+                              {status.charAt(0).toUpperCase() + status.slice(1)}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: 12, color: '#64748b' }}>
+                            {status === 'approved' && (t.approverName || t.approver_name || '—')}
+                            {status === 'rejected' && (
+                              <span title={t.rejectReason || t.reject_reason || ''}>
+                                {t.rejectorName || t.rejector_name || '—'}
+                                {(t.rejectReason || t.reject_reason) && ' ⚠'}
+                              </span>
+                            )}
+                            {status === 'pending' && <span style={{ color: '#d97706' }}>Awaiting approval</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

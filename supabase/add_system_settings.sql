@@ -10,8 +10,8 @@ create table if not exists system_settings (
 insert into system_settings (key, value) values (
   'approval_rules',
   '{
-    "credit_threshold":    { "enabled": true,  "amount": 10000, "roles": ["teller"] },
-    "debit_threshold":     { "enabled": true,  "amount": 5000,  "roles": ["teller"] },
+    "credit_threshold":    { "enabled": true,  "amount": 10000, "roles": ["teller", "collector"] },
+    "debit_threshold":     { "enabled": true,  "amount": 5000,  "roles": ["teller", "collector"] },
     "transfer_threshold":  { "enabled": true,  "amount": 5000,  "roles": ["teller","manager"] },
     "account_opening":     { "enabled": false, "roles": ["teller"] },
     "loan_creation":       { "enabled": true,  "roles": ["teller"] },
