@@ -1,52 +1,48 @@
-// ── Majupat Customer App — Design System ─────────────────────────────────────
+// ── Majupat Customer App — New Design System ─────────────────────────────────
 export const C = {
-  // Brand
-  brand:     '#1a56db',
-  brandDk:   '#1e429f',
-  brandLt:   '#eff6ff',
-  brandMid:  '#3b82f6',
-  // Backgrounds
-  bg:        '#f0f4fb',
-  navy:      '#0b1120',
-  navyMid:   '#0f172a',
-  card:      '#ffffff',
-  surface:   '#f8fafc',
-  // Text
-  text:      '#0f172a',
-  text2:     '#334155',
-  text3:     '#64748b',
-  text4:     '#94a3b8',
-  // Status
-  green:     '#10b981',
-  greenDk:   '#059669',
-  greenBg:   '#d1fae5',
-  greenLt:   '#f0fdf4',
-  red:       '#ef4444',
-  redDk:     '#dc2626',
-  redBg:     '#fee2e2',
-  redLt:     '#fef2f2',
-  amber:     '#f59e0b',
-  amberBg:   '#fef3c7',
-  amberLt:   '#fffbeb',
-  purple:    '#8b5cf6',
-  purpleBg:  '#ede9fe',
-  teal:      '#0d9488',
-  tealBg:    '#f0fdfa',
-  // Border
-  border:    '#e2e8f0',
-  borderLt:  '#f1f5f9',
-  // Shadows
-  shadow:    { shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 12, elevation: 4 },
-  shadowSm:  { shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6,  elevation: 2 },
-  shadowLg:  { shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 20, elevation: 8 },
+  brand:    '#16a34a',   // green
+  brandDk:  '#15803d',
+  brandLt:  '#f0fdf4',
+  brandMid: '#22c55e',
+  accent:   '#7c3aed',   // purple accent
+  accentLt: '#f5f3ff',
+  gold:     '#d97706',
+  goldLt:   '#fffbeb',
+  bg:       '#f8fafc',
+  white:    '#ffffff',
+  card:     '#ffffff',
+  surface:  '#f1f5f9',
+  text:     '#0f172a',
+  text2:    '#1e293b',
+  text3:    '#64748b',
+  text4:    '#94a3b8',
+  green:    '#16a34a',
+  greenDk:  '#15803d',
+  greenBg:  '#dcfce7',
+  greenLt:  '#f0fdf4',
+  red:      '#dc2626',
+  redDk:    '#b91c1c',
+  redBg:    '#fee2e2',
+  redLt:    '#fef2f2',
+  amber:    '#d97706',
+  amberBg:  '#fef3c7',
+  amberLt:  '#fffbeb',
+  blue:     '#2563eb',
+  blueBg:   '#dbeafe',
+  blueLt:   '#eff6ff',
+  border:   '#e2e8f0',
+  borderLt: '#f1f5f9',
+  shadow:   { shadowColor: '#0f172a', shadowOpacity: 0.08, shadowRadius: 16, elevation: 4 },
+  shadowSm: { shadowColor: '#0f172a', shadowOpacity: 0.05, shadowRadius: 8,  elevation: 2 },
+  shadowLg: { shadowColor: '#0f172a', shadowOpacity: 0.14, shadowRadius: 24, elevation: 8 },
 };
 
-export const ACCOUNT_GRADIENTS = [
-  { from: '#1a56db', to: '#1e429f' },
-  { from: '#0d9488', to: '#0f766e' },
-  { from: '#7c3aed', to: '#6d28d9' },
-  { from: '#b45309', to: '#92400e' },
-  { from: '#be185d', to: '#9d174d' },
+export const GRADIENTS = [
+  ['#16a34a', '#15803d'],
+  ['#2563eb', '#1d4ed8'],
+  ['#7c3aed', '#6d28d9'],
+  ['#d97706', '#b45309'],
+  ['#db2777', '#be185d'],
 ];
 
 export const ACCOUNT_ICONS = {
@@ -67,4 +63,4 @@ export const fmtTime = d =>
   d ? new Date(d).toLocaleTimeString('en-GH', { hour: '2-digit', minute: '2-digit' }) : '—';
 
 export const fmtDateTime = d =>
-  d ? fmtDate(d) + '  ·  ' + fmtTime(d) : '—';
+  d ? fmtDate(d) + ' · ' + fmtTime(d) : '—';

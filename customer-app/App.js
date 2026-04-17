@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  StatusBar, Alert, Platform, Animated,
+  StatusBar, Alert, Platform,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,21 +17,14 @@ import TransactionsScreen  from './src/screens/TransactionsScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import ProfileScreen       from './src/screens/ProfileScreen';
 
+// Tab config — 5 tabs, center one is highlighted
 const TABS = [
-  { key: 'home',     label: 'Home',     icon: '⊞', activeIcon: '⊟' },
-  { key: 'accounts', label: 'Accounts', icon: '◈', activeIcon: '◈' },
-  { key: 'loans',    label: 'Loans',    icon: '◉', activeIcon: '◉' },
-  { key: 'txns',     label: 'History',  icon: '≡',  activeIcon: '≡'  },
-  { key: 'notifs',   label: 'Alerts',   icon: '◎', activeIcon: '◎' },
-  { key: 'profile',  label: 'Profile',  icon: '◯', activeIcon: '◯' },
+  { key: 'home',    label: 'Home',     icon: '⌂' },
+  { key: 'accounts',label: 'Accounts', icon: '◈' },
+  { key: 'loans',   label: 'Loans',    icon: '◉', center: true },
+  { key: 'txns',    label: 'History',  icon: '≡' },
+  { key: 'profile', label: 'Profile',  icon: '◯' },
 ];
-
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
 
 function MainApp({ customer, onLogout }) {
   const [tab,      setTab]      = useState('home');
@@ -48,7 +41,7 @@ function MainApp({ customer, onLogout }) {
   }, [customer.id]);
 
   useEffect(() => {
-    const interval = setInterval(() => setTick(t => t + 1), 5000);
+    const interval = setInterval(() => setTick(t => t + 1), 6000);
     const bump = () => setTick(t => t + 1);
     const ch = supabase.channel(`cust-rt-${customer.id}-${Date.now()}`);
     const ids = () => accounts.map(a => a.id);
@@ -64,9 +57,6 @@ function MainApp({ customer, onLogout }) {
     ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'collections' }, p => {
       if (p.new?.customer_id === customer.id) { bump(); setUnread(n => n + 1); }
     });
-    ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, p => {
-      if (p.new?.user_id === customer.id) setUnread(n => n + 1);
-    });
     ch.subscribe();
     return () => { clearInterval(interval); supabase.removeChannel(ch); };
   }, [customer.id, accounts.map(a => a.id).join(',')]);
@@ -81,43 +71,20 @@ function MainApp({ customer, onLogout }) {
     return () => unsub();
   }, [customer.id]);
 
-  const firstName = customer.name?.split(' ')[0] || 'there';
-
   return (
     <SafeAreaView style={A.root} edges={['top', 'bottom']}>
-      <StatusBar barStyle="light-content" backgroundColor={C.navy} />
+      <StatusBar barStyle="dark-content" backgroundColor={C.white} />
 
-      {/* ── Header ── */}
-      <View style={A.header}>
-        <View style={A.headerLeft}>
-          <View style={A.logoBox}>
-            <Text style={A.logoTxt}>M</Text>
-          </View>
-          <View>
-            <Text style={A.greeting}>{getGreeting()}</Text>
-            <Text style={A.userName}>{firstName}</Text>
-          </View>
+      {/* Offline strip */}
+      {!isOnline && (
+        <View style={A.offlineBar}>
+          <Text style={A.offlineTxt}>No internet connection — showing cached data</Text>
         </View>
-        <View style={A.headerRight}>
-          {!isOnline && (
-            <View style={A.offlinePill}>
-              <Text style={A.offlineTxt}>● Offline</Text>
-            </View>
-          )}
-          <TouchableOpacity style={A.notifBtn} onPress={() => setTab('notifs')} activeOpacity={0.8}>
-            <Text style={A.notifIcon}>🔔</Text>
-            {unread > 0 && (
-              <View style={A.notifBadge}>
-                <Text style={A.notifBadgeTxt}>{unread > 9 ? '9+' : unread}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+      )}
 
-      {/* ── Content ── */}
+      {/* Screen content */}
       <View style={A.content}>
-        {tab === 'home'     && <HomeScreen     customer={customer} onTabChange={setTab} tick={tick} />}
+        {tab === 'home'     && <HomeScreen     customer={customer} onTabChange={setTab} tick={tick} onNotifPress={() => setTab('notifs')} unread={unread} />}
         {tab === 'accounts' && <AccountsScreen customer={customer} tick={tick} />}
         {tab === 'loans'    && <LoanScreen     customer={customer} tick={tick} />}
         {tab === 'txns'     && <TransactionsScreen customer={customer} tick={tick} />}
@@ -125,15 +92,25 @@ function MainApp({ customer, onLogout }) {
         {tab === 'profile'  && <ProfileScreen  customer={customer} onLogout={onLogout} />}
       </View>
 
-      {/* ── Tab bar ── */}
+      {/* Bottom tab bar */}
       <View style={A.tabBar}>
         {TABS.map(t => {
           const active = tab === t.key;
+          if (t.center) {
+            return (
+              <TouchableOpacity key={t.key} style={A.tabCenter} onPress={() => setTab(t.key)} activeOpacity={0.85}>
+                <View style={[A.tabCenterBtn, active && A.tabCenterBtnActive]}>
+                  <Text style={A.tabCenterIcon}>{t.icon}</Text>
+                </View>
+                <Text style={[A.tabLabel, active && A.tabLabelActive]}>{t.label}</Text>
+              </TouchableOpacity>
+            );
+          }
           return (
             <TouchableOpacity key={t.key} style={A.tabItem} onPress={() => setTab(t.key)} activeOpacity={0.7}>
-              <View style={[A.tabPill, active && A.tabPillActive]}>
+              <View style={[A.tabIconWrap, active && A.tabIconWrapActive]}>
                 <Text style={[A.tabIcon, active && A.tabIconActive]}>{t.icon}</Text>
-                {t.key === 'notifs' && unread > 0 && <View style={A.tabDot} />}
+                {t.key === 'profile' && unread > 0 && <View style={A.tabBadge}><Text style={A.tabBadgeTxt}>{unread > 9 ? '9+' : unread}</Text></View>}
               </View>
               <Text style={[A.tabLabel, active && A.tabLabelActive]}>{t.label}</Text>
             </TouchableOpacity>
@@ -172,13 +149,10 @@ export default function App() {
   if (!ready) return (
     <SafeAreaProvider>
       <View style={A.splash}>
-        <View style={A.splashRing}>
-          <View style={A.splashLogo}><Text style={A.splashLogoTxt}>M</Text></View>
-        </View>
-        <Text style={A.splashName}>Majupat Love Enterprise</Text>
-        <Text style={A.splashSub}>Customer Portal</Text>
-        <View style={A.splashDots}>
-          {[0, 1, 2].map(i => <View key={i} style={[A.splashDot, { opacity: 0.3 + i * 0.35 }]} />)}
+        <View style={A.splashCard}>
+          <View style={A.splashLogo}><Text style={A.splashLogoTxt}>ML</Text></View>
+          <Text style={A.splashName}>Majupat Love</Text>
+          <Text style={A.splashSub}>Enterprise</Text>
         </View>
         <Text style={A.splashPow}>Powered by Maxbraynn Technology & Systems</Text>
       </View>
@@ -190,56 +164,39 @@ export default function App() {
 }
 
 const A = StyleSheet.create({
-  splash: { flex: 1, backgroundColor: C.navy, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  splashRing: { width: 116, height: 116, borderRadius: 34, borderWidth: 1.5, borderColor: 'rgba(26,86,219,0.35)', alignItems: 'center', justifyContent: 'center', marginBottom: 28 },
-  splashLogo: { width: 92, height: 92, borderRadius: 28, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center', ...{ shadowColor: C.brand, shadowOpacity: 0.5, shadowRadius: 24, elevation: 16 } },
-  splashLogoTxt: { color: '#fff', fontSize: 46, fontWeight: '900' },
-  splashName: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 6, letterSpacing: -0.3 },
-  splashSub: { color: C.brand, fontSize: 13, fontWeight: '600', marginBottom: 36 },
-  splashDots: { flexDirection: 'row', gap: 8, marginBottom: 48 },
-  splashDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.brand },
-  splashPow: { color: '#1e293b', fontSize: 11, position: 'absolute', bottom: 32 },
+  splash: { flex: 1, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center' },
+  splashCard: { alignItems: 'center', marginBottom: 60 },
+  splashLogo: { width: 96, height: 96, borderRadius: 28, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 20, elevation: 12 },
+  splashLogoTxt: { color: C.brand, fontSize: 32, fontWeight: '900' },
+  splashName: { color: '#fff', fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
+  splashSub: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '500', marginTop: 4 },
+  splashPow: { position: 'absolute', bottom: 32, color: 'rgba(255,255,255,0.5)', fontSize: 11 },
 
   root: { flex: 1, backgroundColor: C.bg },
-
-  header: {
-    backgroundColor: C.navy,
-    paddingHorizontal: 20, paddingVertical: 14,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  logoBox: {
-    width: 42, height: 42, borderRadius: 13, backgroundColor: C.brand,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: C.brand, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
-  },
-  logoTxt: { color: '#fff', fontSize: 21, fontWeight: '900' },
-  greeting: { color: '#475569', fontSize: 11, fontWeight: '500', marginBottom: 1 },
-  userName: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: -0.3 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  offlinePill: { backgroundColor: 'rgba(239,68,68,0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
-  offlineTxt: { color: '#fca5a5', fontSize: 10, fontWeight: '700' },
-  notifBtn: { width: 42, height: 42, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center', position: 'relative', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  notifIcon: { fontSize: 18 },
-  notifBadge: { position: 'absolute', top: 5, right: 5, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: C.navy },
-  notifBadgeTxt: { color: '#fff', fontSize: 8, fontWeight: '900' },
-
+  offlineBar: { backgroundColor: '#fef3c7', paddingVertical: 7, paddingHorizontal: 16, alignItems: 'center' },
+  offlineTxt: { fontSize: 12, color: '#92400e', fontWeight: '600' },
   content: { flex: 1 },
 
   tabBar: {
-    flexDirection: 'row', backgroundColor: C.card,
+    flexDirection: 'row', backgroundColor: C.white,
     borderTopWidth: 1, borderTopColor: C.border,
-    paddingBottom: Platform.OS === 'ios' ? 0 : 8,
-    paddingTop: 8, paddingHorizontal: 4,
-    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, elevation: 8,
+    paddingBottom: Platform.OS === 'ios' ? 0 : 6,
+    paddingTop: 8, paddingHorizontal: 8,
+    ...{ shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, elevation: 10 },
   },
-  tabItem: { flex: 1, alignItems: 'center' },
-  tabPill: { width: 44, height: 30, borderRadius: 12, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  tabPillActive: { backgroundColor: C.brandLt },
-  tabIcon: { fontSize: 19, color: C.text4 },
+  tabItem: { flex: 1, alignItems: 'center', paddingBottom: 2 },
+  tabIconWrap: { width: 40, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  tabIconWrapActive: { backgroundColor: C.greenBg },
+  tabIcon: { fontSize: 20, color: C.text4 },
   tabIconActive: { color: C.brand },
-  tabDot: { position: 'absolute', top: 3, right: 5, width: 7, height: 7, borderRadius: 4, backgroundColor: C.red, borderWidth: 1.5, borderColor: C.card },
-  tabLabel: { fontSize: 10, fontWeight: '600', color: C.text4, marginTop: 3 },
+  tabBadge: { position: 'absolute', top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  tabBadgeTxt: { color: '#fff', fontSize: 8, fontWeight: '900' },
+  tabLabel: { fontSize: 10, fontWeight: '600', color: C.text4, marginTop: 2 },
   tabLabelActive: { color: C.brand, fontWeight: '700' },
+
+  // Center loan tab — elevated
+  tabCenter: { flex: 1, alignItems: 'center', marginTop: -18 },
+  tabCenterBtn: { width: 52, height: 52, borderRadius: 18, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: C.white, shadowColor: C.brand, shadowOpacity: 0.2, shadowRadius: 8, elevation: 6 },
+  tabCenterBtnActive: { backgroundColor: C.brand },
+  tabCenterIcon: { fontSize: 22, color: C.text3 },
 });

@@ -1,15 +1,13 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Dimensions, FlatList,
+  ActivityIndicator, RefreshControl, Dimensions,
 } from 'react-native';
 import { supabase } from '../supabase';
 import { cacheData, getCached, subscribeToNetwork } from '../offline';
-import { C, GHS, fmtDate, fmtTime, ACCOUNT_GRADIENTS, ACCOUNT_ICONS } from '../theme';
+import { C, GHS, fmtDate, fmtTime, GRADIENTS, ACCOUNT_ICONS } from '../theme';
 
 const { width: W } = Dimensions.get('window');
-const CARD_W = W - 40;
 
 function todayBounds() {
   const s = new Date(); s.setHours(0, 0, 0, 0);
@@ -17,48 +15,43 @@ function todayBounds() {
   return { start: s.toISOString(), end: e.toISOString() };
 }
 
-export default function HomeScreen({ customer, onTabChange, tick }) {
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+export default function HomeScreen({ customer, onTabChange, tick, onNotifPress, unread }) {
   const [accounts,   setAccounts]   = useState([]);
   const [loans,      setLoans]      = useState([]);
-  const [loanPaid,   setLoanPaid]   = useState({});
   const [todayTxns,  setTodayTxns]  = useState([]);
   const [recentTxns, setRecentTxns] = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeCard, setActiveCard] = useState(0);
-  const [isOnline,   setIsOnline]   = useState(true);
+  const [balVisible, setBalVisible] = useState(true);
   const firstLoad = useRef(true);
-  const flatRef   = useRef(null);
-
-  useEffect(() => { const u = subscribeToNetwork(setIsOnline); return () => u(); }, []);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true); else if (firstLoad.current) setLoading(true);
     try {
-      const cacheKey = `home_${customer.id}`;
+      const cacheKey = `home2_${customer.id}`;
       if (!refresh && firstLoad.current) {
         const cached = await getCached(cacheKey);
         if (cached) {
           setAccounts(cached.accounts || []); setLoans(cached.loans || []);
-          setLoanPaid(cached.loanPaid || {}); setTodayTxns(cached.todayTxns || []);
-          setRecentTxns(cached.recentTxns || []); setLoading(false); firstLoad.current = false;
-          if (!isOnline) { setRefreshing(false); return; }
+          setTodayTxns(cached.todayTxns || []); setRecentTxns(cached.recentTxns || []);
+          setLoading(false); firstLoad.current = false;
         }
       }
       const [accsRes, loansRes] = await Promise.all([
         supabase.from('accounts').select('id,account_number,type,balance,status,interest_rate,opened_at')
           .eq('customer_id', customer.id).eq('status', 'active').order('opened_at', { ascending: true }),
-        supabase.from('loans').select('id,type,amount,outstanding,monthly_payment,status,next_due_date,interest_rate,tenure,payment_frequency')
+        supabase.from('loans').select('id,type,amount,outstanding,monthly_payment,status,next_due_date,interest_rate,tenure')
           .eq('customer_id', customer.id).in('status', ['active', 'overdue']),
       ]);
       const accs = accsRes.data || [], lns = loansRes.data || [];
       setAccounts(accs); setLoans(lns);
-      if (lns.length) {
-        const { data: cols } = await supabase.from('collections').select('loan_id,amount').in('loan_id', lns.map(l => l.id));
-        const totals = {};
-        (cols || []).forEach(c => { totals[c.loan_id] = (totals[c.loan_id] || 0) + Number(c.amount); });
-        setLoanPaid(totals);
-      }
       if (accs.length) {
         const ids = accs.map(a => a.id);
         const { start, end } = todayBounds();
@@ -66,337 +59,231 @@ export default function HomeScreen({ customer, onTabChange, tick }) {
           supabase.from('transactions').select('id,account_id,type,amount,narration,created_at,balance_after')
             .in('account_id', ids).gte('created_at', start).lte('created_at', end).order('created_at', { ascending: false }),
           supabase.from('transactions').select('id,account_id,type,amount,narration,created_at')
-            .in('account_id', ids).lt('created_at', start).order('created_at', { ascending: false }).limit(5),
+            .in('account_id', ids).order('created_at', { ascending: false }).limit(8),
         ]);
         setTodayTxns(todayRes.data || []); setRecentTxns(recentRes.data || []);
       }
-      await cacheData(`home_${customer.id}`, { accounts: accs, loans: lns, loanPaid: {}, todayTxns: [], recentTxns: [] });
+      await cacheData(cacheKey, { accounts: accs, loans: lns, todayTxns: [], recentTxns: [] });
     } catch (e) { console.warn(e.message); }
     if (refresh) setRefreshing(false); else { setLoading(false); firstLoad.current = false; }
   }, [customer.id, tick]);
 
   useEffect(() => { load(); }, [load]);
 
-  const totalBal    = accounts.reduce((s, a) => s + Number(a.balance || 0), 0);
-  const todayIn     = todayTxns.filter(t => t.type === 'credit').reduce((s, t) => s + Number(t.amount), 0);
-  const todayOut    = todayTxns.filter(t => t.type === 'debit').reduce((s, t) => s + Number(t.amount), 0);
-  const overdueLoans = loans.filter(l => l.status === 'overdue');
-  const nextDue     = loans.filter(l => l.next_due_date).sort((a, b) => new Date(a.next_due_date) - new Date(b.next_due_date))[0];
+  const totalBal   = accounts.reduce((s, a) => s + Number(a.balance || 0), 0);
+  const todayIn    = todayTxns.filter(t => t.type === 'credit').reduce((s, t) => s + Number(t.amount), 0);
+  const todayOut   = todayTxns.filter(t => t.type === 'debit').reduce((s, t) => s + Number(t.amount), 0);
+  const overdue    = loans.filter(l => l.status === 'overdue');
+  const nextDue    = loans.filter(l => l.next_due_date).sort((a, b) => new Date(a.next_due_date) - new Date(b.next_due_date))[0];
+  const firstName  = customer.name?.split(' ')[0] || 'there';
 
   if (loading) return (
     <View style={S.center}>
       <ActivityIndicator color={C.brand} size="large" />
-      <Text style={S.loadTxt}>Loading your dashboard…</Text>
+      <Text style={S.loadTxt}>Loading…</Text>
     </View>
   );
 
   return (
-    <ScrollView style={S.root} contentContainerStyle={{ paddingBottom: 36 }}
+    <ScrollView style={S.root} contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={C.brand} />}
       showsVerticalScrollIndicator={false}>
 
-      {/* Offline banner */}
-      {!isOnline && (
-        <View style={S.offlineBanner}>
-          <Text style={S.offlineTxt}>📡  Offline — showing cached data</Text>
+      {/* ── Header ── */}
+      <View style={S.header}>
+        <View>
+          <Text style={S.greetTxt}>{greeting()},</Text>
+          <Text style={S.nameTxt}>{firstName} 👋</Text>
         </View>
-      )}
-
-      {/* ── Hero balance ── */}
-      <View style={S.hero}>
-        <Text style={S.heroEyebrow}>TOTAL PORTFOLIO BALANCE</Text>
-        <Text style={S.heroAmt}>{GHS(totalBal)}</Text>
-        <Text style={S.heroSub}>{accounts.length} active account{accounts.length !== 1 ? 's' : ''}</Text>
-        {(todayIn > 0 || todayOut > 0) && (
-          <View style={S.todayRow}>
-            {todayIn  > 0 && <View style={S.pill}><Text style={S.pillTxt}>▲ {GHS(todayIn)} in today</Text></View>}
-            {todayOut > 0 && <View style={[S.pill, S.pillRed]}><Text style={S.pillTxt}>▼ {GHS(todayOut)} out today</Text></View>}
-          </View>
-        )}
+        <TouchableOpacity style={S.notifBtn} onPress={onNotifPress} activeOpacity={0.8}>
+          <Text style={S.notifIcon}>🔔</Text>
+          {unread > 0 && <View style={S.notifDot}><Text style={S.notifDotTxt}>{unread > 9 ? '9+' : unread}</Text></View>}
+        </TouchableOpacity>
       </View>
 
-      {/* ── Quick stats ── */}
-      <View style={S.statsRow}>
-        {[
-          { label: 'Accounts',    value: String(accounts.length),  color: C.brand },
-          { label: 'Active Loans',value: String(loans.length),     color: loans.length > 0 ? C.amber : C.text4 },
-          { label: 'Overdue',     value: String(overdueLoans.length), color: overdueLoans.length > 0 ? C.red : C.text4 },
-          { label: 'Today In',    value: GHS(todayIn),             color: C.green, small: true },
-        ].map((s, i) => (
-          <View key={s.label} style={[S.statCell, i < 3 && S.statCellBorder]}>
-            <Text style={[S.statVal, { color: s.color }, s.small && { fontSize: 12 }]}>{s.value}</Text>
-            <Text style={S.statLabel}>{s.label}</Text>
+      {/* ── Balance hero card ── */}
+      <View style={S.heroCard}>
+        <View style={S.heroDecor1} />
+        <View style={S.heroDecor2} />
+        <View style={S.heroTop}>
+          <Text style={S.heroLabel}>Total Portfolio Balance</Text>
+          <TouchableOpacity onPress={() => setBalVisible(v => !v)} style={S.eyeBtn}>
+            <Text style={{ fontSize: 16 }}>{balVisible ? '👁️' : '🙈'}</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={S.heroAmt}>{balVisible ? GHS(totalBal) : 'GH₵ ••••••'}</Text>
+        <Text style={S.heroSub}>{accounts.length} active account{accounts.length !== 1 ? 's' : ''}</Text>
+
+        {/* Today stats */}
+        <View style={S.heroStats}>
+          <View style={S.heroStat}>
+            <Text style={S.heroStatLabel}>Today In</Text>
+            <Text style={[S.heroStatVal, { color: '#86efac' }]}>+{GHS(todayIn)}</Text>
           </View>
+          <View style={S.heroStatDiv} />
+          <View style={S.heroStat}>
+            <Text style={S.heroStatLabel}>Today Out</Text>
+            <Text style={[S.heroStatVal, { color: '#fca5a5' }]}>-{GHS(todayOut)}</Text>
+          </View>
+          <View style={S.heroStatDiv} />
+          <View style={S.heroStat}>
+            <Text style={S.heroStatLabel}>Transactions</Text>
+            <Text style={[S.heroStatVal, { color: '#fff' }]}>{todayTxns.length}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* ── Quick actions ── */}
+      <View style={S.quickRow}>
+        {[
+          { icon: '🏦', label: 'Accounts', tab: 'accounts' },
+          { icon: '📋', label: 'Loans',    tab: 'loans'    },
+          { icon: '📊', label: 'History',  tab: 'txns'     },
+          { icon: '🔔', label: 'Alerts',   tab: 'notifs'   },
+        ].map(q => (
+          <TouchableOpacity key={q.tab} style={S.quickBtn} onPress={() => onTabChange?.(q.tab)} activeOpacity={0.8}>
+            <View style={S.quickIcon}><Text style={{ fontSize: 22 }}>{q.icon}</Text></View>
+            <Text style={S.quickLabel}>{q.label}</Text>
+          </TouchableOpacity>
         ))}
       </View>
 
       {/* ── Alerts ── */}
-      {overdueLoans.length > 0 && (
-        <View style={S.alertCard}>
-          <View style={S.alertIconBox}><Text style={{ fontSize: 20 }}>⚠️</Text></View>
+      {overdue.length > 0 && (
+        <TouchableOpacity style={S.alertBanner} onPress={() => onTabChange?.('loans')} activeOpacity={0.85}>
+          <Text style={{ fontSize: 20 }}>⚠️</Text>
           <View style={{ flex: 1 }}>
-            <Text style={S.alertTitle}>Overdue Payment{overdueLoans.length > 1 ? 's' : ''}</Text>
-            <Text style={S.alertBody}>{overdueLoans.length} loan{overdueLoans.length > 1 ? 's are' : ' is'} overdue. Contact your branch immediately.</Text>
+            <Text style={S.alertTitle}>{overdue.length} Overdue Loan{overdue.length > 1 ? 's' : ''}</Text>
+            <Text style={S.alertBody}>Tap to view and make payment arrangements</Text>
           </View>
-        </View>
+          <Text style={{ color: C.red, fontSize: 18 }}>›</Text>
+        </TouchableOpacity>
       )}
-      {!overdueLoans.length && nextDue && (
-        <View style={S.dueCard}>
-          <View style={S.dueIconBox}><Text style={{ fontSize: 20 }}>📅</Text></View>
+      {!overdue.length && nextDue && (
+        <View style={S.dueBanner}>
+          <Text style={{ fontSize: 20 }}>📅</Text>
           <View style={{ flex: 1 }}>
             <Text style={S.dueTitle}>Next Payment Due</Text>
-            <Text style={S.dueBody}>{fmtDate(nextDue.next_due_date)}  ·  {GHS(nextDue.monthly_payment)}</Text>
+            <Text style={S.dueBody}>{fmtDate(nextDue.next_due_date)} · {GHS(nextDue.monthly_payment)}</Text>
           </View>
         </View>
       )}
 
-      {/* ── Account cards ── */}
-      {accounts.length > 0 ? (
-        <View style={{ marginTop: 8 }}>
-          <SectionHeader label="My Accounts" action="See all" onAction={() => onTabChange?.('accounts')} />
-          <FlatList ref={flatRef} data={accounts} horizontal pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={CARD_W + 16} decelerationRate="fast"
-            contentContainerStyle={{ paddingHorizontal: 20 }}
-            keyExtractor={i => i.id}
-            onMomentumScrollEnd={e => setActiveCard(Math.round(e.nativeEvent.contentOffset.x / (CARD_W + 16)))}
-            renderItem={({ item: acc, index }) => {
-              const g = ACCOUNT_GRADIENTS[index % ACCOUNT_GRADIENTS.length];
+      {/* ── My Accounts ── */}
+      {accounts.length > 0 && (
+        <View style={S.section}>
+          <View style={S.secRow}>
+            <Text style={S.secTitle}>My Accounts</Text>
+            <TouchableOpacity onPress={() => onTabChange?.('accounts')}><Text style={S.secLink}>See all ›</Text></TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+            {accounts.map((acc, idx) => {
+              const [from, to] = GRADIENTS[idx % GRADIENTS.length];
               return (
-                <View style={[S.accCard, { backgroundColor: g.from, width: CARD_W, marginRight: 16 }]}>
-                  {/* Decorative circle */}
-                  <View style={S.accCircle} />
-                  <View style={S.accCardTop}>
-                    <View style={S.accIconWrap}>
-                      <Text style={{ fontSize: 20 }}>{ACCOUNT_ICONS[acc.type] || '🏧'}</Text>
-                    </View>
-                    <View style={S.accTypePill}>
-                      <Text style={S.accTypeTxt}>{(acc.type || '').replace(/_/g, ' ').toUpperCase()}</Text>
-                    </View>
-                  </View>
-                  <Text style={S.accBal}>{GHS(acc.balance)}</Text>
-                  <Text style={S.accBalLabel}>Available Balance</Text>
-                  <View style={S.accDivider} />
-                  <View style={S.accCardBottom}>
-                    <View>
-                      <Text style={S.accMetaLabel}>Account No.</Text>
-                      <Text style={S.accMetaVal}>{acc.account_number}</Text>
-                    </View>
-                    {acc.opened_at && (
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={S.accMetaLabel}>Member Since</Text>
-                        <Text style={S.accMetaVal}>{new Date(acc.opened_at).toLocaleDateString('en-GH', { month: 'short', year: 'numeric' })}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
+                <TouchableOpacity key={acc.id} style={[S.accMini, { backgroundColor: from }]} onPress={() => onTabChange?.('accounts')} activeOpacity={0.88}>
+                  <View style={S.accMiniDecor} />
+                  <Text style={S.accMiniIcon}>{ACCOUNT_ICONS[acc.type] || '🏧'}</Text>
+                  <Text style={S.accMiniType}>{(acc.type || '').replace(/_/g, ' ')}</Text>
+                  <Text style={S.accMiniBal}>{balVisible ? GHS(acc.balance) : '••••'}</Text>
+                  <Text style={S.accMiniNum}>{acc.account_number}</Text>
+                </TouchableOpacity>
               );
-            }}
-          />
-          {accounts.length > 1 && (
-            <View style={S.dots}>
-              {accounts.map((_, i) => <View key={i} style={[S.dot, i === activeCard && S.dotActive]} />)}
-            </View>
-          )}
-        </View>
-      ) : (
-        <View style={S.emptyCard}>
-          <Text style={{ fontSize: 36, marginBottom: 10 }}>🏦</Text>
-          <Text style={S.emptyTitle}>No Active Accounts</Text>
-          <Text style={S.emptyHint}>Contact your branch to open an account</Text>
+            })}
+          </ScrollView>
         </View>
       )}
 
-      {/* ── Today's activity ── */}
-      {todayTxns.length > 0 && (
-        <View style={S.section}>
-          <SectionHeader label="Today's Activity" badge={`${todayTxns.length} txn${todayTxns.length > 1 ? 's' : ''}`} />
-          {todayTxns.map(txn => <TxnRow key={txn.id} txn={txn} showTime />)}
-        </View>
-      )}
-
-      {/* ── Active loans ── */}
-      {loans.length > 0 && (
-        <View style={S.section}>
-          <SectionHeader label="Active Loans" action="View all" onAction={() => onTabChange?.('loans')} />
-          {loans.map(loan => {
-            const overdue = loan.status === 'overdue';
-            const monthly = Number(loan.monthly_payment || 0);
-            const tenure  = Number(loan.tenure || 0);
-            const orig    = Number(loan.amount || 0);
-            const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : orig;
-            const out     = Number(loan.outstanding || 0);
-            const pct     = totalRepay > 0 ? Math.min(100, ((totalRepay - out) / totalRepay) * 100) : 0;
-            return (
-              <View key={loan.id} style={[S.loanCard, overdue && S.loanCardOverdue]}>
-                <View style={S.loanTop}>
-                  <View style={[S.loanIconBox, { backgroundColor: overdue ? C.redLt : '#fff7ed' }]}>
-                    <Text style={{ fontSize: 22 }}>{overdue ? '⚠️' : '📋'}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={S.loanType}>{(loan.type || 'Loan').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</Text>
-                    {loan.next_due_date && (
-                      <Text style={[S.loanDue, overdue && { color: C.red }]}>
-                        {overdue ? '⚠️ Overdue · ' : 'Due: '}{fmtDate(loan.next_due_date)}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={[S.loanBadge, { backgroundColor: overdue ? C.redBg : C.greenBg }]}>
-                    <Text style={[S.loanBadgeTxt, { color: overdue ? C.red : C.green }]}>{overdue ? 'OVERDUE' : 'ACTIVE'}</Text>
-                  </View>
-                </View>
-                <View style={S.progTrack}>
-                  <View style={[S.progFill, { width: `${pct}%`, backgroundColor: overdue ? C.red : C.brand }]} />
-                </View>
-                <Text style={S.progPct}>{pct.toFixed(0)}% repaid</Text>
-                <View style={S.loanGrid}>
-                  {[
-                    ['Principal',   GHS(orig),                                    C.text],
-                    ['Outstanding', GHS(out),                                     overdue ? C.red : '#c2410c'],
-                    ['Total Paid',  GHS(Math.max(0, totalRepay - out)),           C.green],
-                    ['Installment', GHS(loan.monthly_payment),                    C.brand],
-                  ].map(([l, v, col]) => (
-                    <View key={l} style={S.loanStat}>
-                      <Text style={S.loanStatLabel}>{l}</Text>
-                      <Text style={[S.loanStatVal, { color: col }]}>{v}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {/* ── Recent transactions ── */}
+      {/* ── Recent Transactions ── */}
       <View style={S.section}>
-        <SectionHeader label="Recent Transactions" action="View all" onAction={() => onTabChange?.('txns')} />
-        {recentTxns.length === 0 && todayTxns.length === 0 ? (
-          <View style={S.emptyCard}>
-            <Text style={{ fontSize: 28, marginBottom: 8 }}>📋</Text>
-            <Text style={S.emptyTitle}>No transactions yet</Text>
+        <View style={S.secRow}>
+          <Text style={S.secTitle}>Recent Transactions</Text>
+          <TouchableOpacity onPress={() => onTabChange?.('txns')}><Text style={S.secLink}>View all ›</Text></TouchableOpacity>
+        </View>
+        {recentTxns.length === 0 ? (
+          <View style={S.emptyBox}>
+            <Text style={{ fontSize: 32, marginBottom: 8 }}>📋</Text>
+            <Text style={S.emptyTxt}>No transactions yet</Text>
           </View>
-        ) : recentTxns.length === 0 ? (
-          <View style={[S.emptyCard, { paddingVertical: 14 }]}>
-            <Text style={S.emptyHint}>No earlier transactions</Text>
-          </View>
-        ) : recentTxns.map(txn => <TxnRow key={txn.id} txn={txn} />)}
+        ) : recentTxns.map(t => <TxnRow key={t.id} txn={t} />)}
       </View>
     </ScrollView>
   );
 }
 
-function SectionHeader({ label, action, onAction, badge }) {
-  return (
-    <View style={S.secHeader}>
-      <Text style={S.secLabel}>{label}</Text>
-      {action && <TouchableOpacity onPress={onAction}><Text style={S.secAction}>{action} →</Text></TouchableOpacity>}
-      {badge && <View style={S.secBadge}><Text style={S.secBadgeTxt}>{badge}</Text></View>}
-    </View>
-  );
-}
-
-function TxnRow({ txn, showTime }) {
-  const isCredit = txn.type === 'credit';
+function TxnRow({ txn }) {
+  const cr = txn.type === 'credit';
   return (
     <View style={S.txnRow}>
-      <View style={[S.txnIcon, { backgroundColor: isCredit ? C.greenLt : C.redLt }]}>
-        <Text style={[S.txnArrow, { color: isCredit ? C.green : C.red }]}>{isCredit ? '↑' : '↓'}</Text>
+      <View style={[S.txnDot, { backgroundColor: cr ? C.greenBg : C.redBg }]}>
+        <Text style={[S.txnArrow, { color: cr ? C.green : C.red }]}>{cr ? '↑' : '↓'}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <Text style={S.txnNarr} numberOfLines={1}>{txn.narration || 'Transaction'}</Text>
-        <Text style={S.txnDate}>{showTime ? fmtTime(txn.created_at) : fmtDate(txn.created_at)}</Text>
+        <Text style={S.txnDate}>{fmtDate(txn.created_at)} · {fmtTime(txn.created_at)}</Text>
       </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[S.txnAmt, { color: isCredit ? C.green : C.red }]}>{isCredit ? '+' : '-'}{GHS(txn.amount)}</Text>
-        {txn.balance_after != null && <Text style={S.txnBal}>Bal: {GHS(txn.balance_after)}</Text>}
-      </View>
+      <Text style={[S.txnAmt, { color: cr ? C.green : C.red }]}>{cr ? '+' : '-'}{GHS(txn.amount)}</Text>
     </View>
   );
 }
 
 const S = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   loadTxt: { color: C.text3, fontSize: 13 },
 
-  offlineBanner: { backgroundColor: '#fef9c3', paddingVertical: 9, paddingHorizontal: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  offlineTxt: { fontSize: 12, color: '#92400e', fontWeight: '600' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.borderLt },
+  greetTxt: { fontSize: 13, color: C.text3, fontWeight: '500' },
+  nameTxt: { fontSize: 20, fontWeight: '800', color: C.text },
+  notifBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, position: 'relative' },
+  notifIcon: { fontSize: 20 },
+  notifDot: { position: 'absolute', top: 6, right: 6, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  notifDotTxt: { color: '#fff', fontSize: 8, fontWeight: '900' },
 
-  hero: { backgroundColor: C.navyMid, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 32 },
-  heroEyebrow: { color: '#334155', fontSize: 10, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
-  heroAmt: { color: '#fff', fontSize: 38, fontWeight: '900', letterSpacing: -1.5, marginBottom: 4 },
-  heroSub: { color: '#475569', fontSize: 12, marginBottom: 14 },
-  todayRow: { flexDirection: 'row', gap: 8 },
-  pill: { backgroundColor: 'rgba(16,185,129,0.2)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
-  pillRed: { backgroundColor: 'rgba(239,68,68,0.2)', borderColor: 'rgba(239,68,68,0.3)' },
-  pillTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  heroCard: { margin: 16, borderRadius: 24, backgroundColor: C.brand, padding: 22, overflow: 'hidden', ...C.shadowLg },
+  heroDecor1: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.07)', top: -80, right: -60 },
+  heroDecor2: { position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.05)', bottom: -40, left: 20 },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  heroLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600' },
+  eyeBtn: { padding: 4 },
+  heroAmt: { color: '#fff', fontSize: 34, fontWeight: '900', letterSpacing: -1, marginBottom: 4 },
+  heroSub: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginBottom: 20 },
+  heroStats: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 14, padding: 14 },
+  heroStat: { flex: 1, alignItems: 'center' },
+  heroStatDiv: { width: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
+  heroStatLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '600', marginBottom: 4 },
+  heroStatVal: { fontSize: 13, fontWeight: '800' },
 
-  statsRow: { flexDirection: 'row', backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.borderLt },
-  statCell: { flex: 1, alignItems: 'center', paddingVertical: 14 },
-  statCellBorder: { borderRightWidth: 1, borderRightColor: C.borderLt },
-  statVal: { fontSize: 17, fontWeight: '900', marginBottom: 3 },
-  statLabel: { fontSize: 9, color: C.text4, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  quickRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 8 },
+  quickBtn: { flex: 1, alignItems: 'center', backgroundColor: C.white, borderRadius: 16, paddingVertical: 14, borderWidth: 1, borderColor: C.borderLt, ...C.shadowSm },
+  quickIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: C.greenLt, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  quickLabel: { fontSize: 11, fontWeight: '700', color: C.text2 },
 
-  alertCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.redLt, borderLeftWidth: 4, borderLeftColor: C.red, marginHorizontal: 16, marginTop: 16, borderRadius: 14, padding: 14, ...C.shadowSm },
-  alertIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.redBg, alignItems: 'center', justifyContent: 'center' },
-  alertTitle: { fontSize: 14, fontWeight: '800', color: C.redDk, marginBottom: 3 },
-  alertBody: { fontSize: 12, color: '#7f1d1d', lineHeight: 17 },
-
-  dueCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.amberLt, borderLeftWidth: 4, borderLeftColor: C.amber, marginHorizontal: 16, marginTop: 16, borderRadius: 14, padding: 14, ...C.shadowSm },
-  dueIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.amberBg, alignItems: 'center', justifyContent: 'center' },
-  dueTitle: { fontSize: 14, fontWeight: '800', color: '#92400e', marginBottom: 3 },
+  alertBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.redLt, borderLeftWidth: 4, borderLeftColor: C.red, marginHorizontal: 16, marginBottom: 8, borderRadius: 14, padding: 14 },
+  alertTitle: { fontSize: 14, fontWeight: '800', color: C.redDk, marginBottom: 2 },
+  alertBody: { fontSize: 12, color: '#7f1d1d' },
+  dueBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.amberLt, borderLeftWidth: 4, borderLeftColor: C.amber, marginHorizontal: 16, marginBottom: 8, borderRadius: 14, padding: 14 },
+  dueTitle: { fontSize: 14, fontWeight: '800', color: '#92400e', marginBottom: 2 },
   dueBody: { fontSize: 12, color: '#78350f' },
 
-  section: { marginTop: 24 },
-  secHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingHorizontal: 20 },
-  secLabel: { fontSize: 13, fontWeight: '800', color: C.text2, letterSpacing: 0.2 },
-  secAction: { fontSize: 12, color: C.brand, fontWeight: '700' },
-  secBadge: { backgroundColor: C.brandLt, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  secBadgeTxt: { fontSize: 11, color: C.brand, fontWeight: '700' },
+  section: { marginTop: 8 },
+  secRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 12 },
+  secTitle: { fontSize: 16, fontWeight: '800', color: C.text },
+  secLink: { fontSize: 13, color: C.brand, fontWeight: '700' },
 
-  accCard: { borderRadius: 22, padding: 22, overflow: 'hidden', ...C.shadowLg },
-  accCircle: { position: 'absolute', width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.06)', top: -60, right: -40 },
-  accCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  accIconWrap: { width: 44, height: 44, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
-  accTypePill: { backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
-  accTypeTxt: { color: 'rgba(255,255,255,0.9)', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  accBal: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8, marginBottom: 3 },
-  accBalLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginBottom: 16 },
-  accDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.12)', marginBottom: 14 },
-  accCardBottom: { flexDirection: 'row', justifyContent: 'space-between' },
-  accMetaLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 10, marginBottom: 3 },
-  accMetaVal: { color: '#fff', fontSize: 13, fontWeight: '700', fontFamily: 'monospace' },
+  accMini: { width: 160, borderRadius: 18, padding: 16, overflow: 'hidden', ...C.shadow },
+  accMiniDecor: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.08)', top: -30, right: -20 },
+  accMiniIcon: { fontSize: 24, marginBottom: 10 },
+  accMiniType: { color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 },
+  accMiniBal: { color: '#fff', fontSize: 16, fontWeight: '900', marginBottom: 6 },
+  accMiniNum: { color: 'rgba(255,255,255,0.6)', fontSize: 11, fontFamily: 'monospace' },
 
-  dots: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 14, marginBottom: 4 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.border },
-  dotActive: { width: 20, backgroundColor: C.brand, borderRadius: 3 },
+  emptyBox: { alignItems: 'center', paddingVertical: 32, marginHorizontal: 16, backgroundColor: C.white, borderRadius: 16, borderWidth: 1, borderColor: C.borderLt },
+  emptyTxt: { fontSize: 14, color: C.text4, fontWeight: '600' },
 
-  emptyCard: { marginHorizontal: 20, backgroundColor: C.card, borderRadius: 16, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: C.borderLt },
-  emptyTitle: { fontSize: 15, fontWeight: '700', color: C.text3, marginBottom: 5 },
-  emptyHint: { fontSize: 12, color: C.text4, textAlign: 'center' },
-
-  loanCard: { marginHorizontal: 20, backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: '#fed7aa', ...C.shadowSm },
-  loanCardOverdue: { borderColor: '#fecaca' },
-  loanTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  loanIconBox: { width: 46, height: 46, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  loanType: { fontSize: 15, fontWeight: '800', color: C.text, marginBottom: 2 },
-  loanDue: { fontSize: 12, color: '#92400e' },
-  loanBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  loanBadgeTxt: { fontSize: 10, fontWeight: '800' },
-  progTrack: { height: 6, backgroundColor: C.borderLt, borderRadius: 3, overflow: 'hidden', marginBottom: 4 },
-  progFill: { height: 6, borderRadius: 3 },
-  progPct: { fontSize: 10, color: C.text4, textAlign: 'right', marginBottom: 12 },
-  loanGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  loanStat: { flex: 1, minWidth: '45%', backgroundColor: C.surface, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: C.borderLt },
-  loanStatLabel: { fontSize: 10, color: C.text4, fontWeight: '600', marginBottom: 3 },
-  loanStatVal: { fontSize: 13, fontWeight: '800' },
-
-  txnRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, marginHorizontal: 20, borderWidth: 1, borderColor: C.borderLt, ...C.shadowSm },
-  txnIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  txnRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: C.borderLt, backgroundColor: C.white },
+  txnDot: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   txnArrow: { fontSize: 18, fontWeight: '800' },
   txnNarr: { fontSize: 13, fontWeight: '600', color: C.text, marginBottom: 2 },
   txnDate: { fontSize: 11, color: C.text4 },
   txnAmt: { fontSize: 14, fontWeight: '800' },
-  txnBal: { fontSize: 10, color: C.text4, marginTop: 2 },
 });

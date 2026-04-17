@@ -1,27 +1,19 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, RefreshControl, TextInput,
-} from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, TextInput } from 'react-native';
 import { supabase } from '../supabase';
 import { C, GHS, fmtDate, fmtTime } from '../theme';
 
-const FILTERS = [
-  { key: 'all',    label: 'All'     },
-  { key: 'credit', label: 'Credits' },
-  { key: 'debit',  label: 'Debits'  },
-];
+const FILTERS = [{ key: 'all', label: 'All' }, { key: 'credit', label: 'Credits' }, { key: 'debit', label: 'Debits' }];
 
 export default function TransactionsScreen({ customer, tick }) {
-  const [accounts,     setAccounts]     = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [filtered,     setFiltered]     = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [refreshing,   setRefreshing]   = useState(false);
-  const [filter,       setFilter]       = useState('all');
-  const [search,       setSearch]       = useState('');
-  const [selAcc,       setSelAcc]       = useState('all');
+  const [filtered, setFiltered] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [selAcc, setSelAcc] = useState('all');
   const firstLoad = useRef(true);
 
   const load = useCallback(async (refresh = false) => {
@@ -33,7 +25,7 @@ export default function TransactionsScreen({ customer, tick }) {
     if (!ids.length) { setTransactions([]); setFiltered([]); if (refresh) setRefreshing(false); else { setLoading(false); firstLoad.current = false; } return; }
     const { data } = await supabase.from('transactions')
       .select('id,account_id,type,amount,narration,reference,created_at,balance_after,channel')
-      .in('account_id', ids).order('created_at', { ascending: false }).limit(150);
+      .in('account_id', ids).order('created_at', { ascending: false }).limit(200);
     setTransactions(data || []);
     if (refresh) setRefreshing(false); else { setLoading(false); firstLoad.current = false; }
   }, [customer.id, tick]);
@@ -55,58 +47,71 @@ export default function TransactionsScreen({ customer, tick }) {
   const totalIn  = filtered.filter(t => t.type === 'credit').reduce((s, t) => s + Number(t.amount), 0);
   const totalOut = filtered.filter(t => t.type === 'debit').reduce((s, t) => s + Number(t.amount), 0);
 
-  const renderItem = ({ item: txn }) => {
-    const isCredit = txn.type === 'credit';
-    const date = txn.created_at ? new Date(txn.created_at) : null;
-    return (
-      <View style={S.txnCard}>
-        <View style={[S.txnIcon, { backgroundColor: isCredit ? C.greenLt : C.redLt }]}>
-          <Text style={[S.txnArrow, { color: isCredit ? C.green : C.red }]}>{isCredit ? '↑' : '↓'}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={S.txnNarr} numberOfLines={2}>{txn.narration || 'Transaction'}</Text>
-          <Text style={S.txnMeta}>{getAccNum(txn.account_id)}{txn.reference ? '  ·  ' + txn.reference : ''}</Text>
-          {date && <Text style={S.txnDate}>{fmtDate(txn.created_at)}  ·  {fmtTime(txn.created_at)}</Text>}
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[S.txnAmt, { color: isCredit ? C.green : C.red }]}>{isCredit ? '+' : '-'}{GHS(txn.amount)}</Text>
-          {txn.balance_after != null && <Text style={S.txnBal}>Bal: {GHS(txn.balance_after)}</Text>}
-          {txn.channel && <View style={S.channelBadge}><Text style={S.channelTxt}>{txn.channel}</Text></View>}
-        </View>
-      </View>
-    );
-  };
+  // Group by date
+  const grouped = filtered.reduce((acc, t) => {
+    const d = fmtDate(t.created_at);
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(t);
+    return acc;
+  }, {});
+  const sections = Object.entries(grouped);
+
+  const renderSection = ([date, items]) => (
+    <View key={date}>
+      <Text style={S.dateHeader}>{date}</Text>
+      {items.map(txn => {
+        const cr = txn.type === 'credit';
+        return (
+          <View key={txn.id} style={S.txnCard}>
+            <View style={[S.txnDot, { backgroundColor: cr ? C.greenBg : C.redBg }]}>
+              <Text style={[S.txnArrow, { color: cr ? C.green : C.red }]}>{cr ? '↑' : '↓'}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={S.txnNarr} numberOfLines={1}>{txn.narration || 'Transaction'}</Text>
+              <Text style={S.txnMeta}>{getAccNum(txn.account_id)}{txn.channel ? ' · ' + txn.channel : ''}</Text>
+              <Text style={S.txnTime}>{fmtTime(txn.created_at)}</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[S.txnAmt, { color: cr ? C.green : C.red }]}>{cr ? '+' : '-'}{GHS(txn.amount)}</Text>
+              {txn.balance_after != null && <Text style={S.txnBal}>Bal: {GHS(txn.balance_after)}</Text>}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
 
   return (
     <View style={S.root}>
+      {/* Header */}
+      <View style={S.header}>
+        <Text style={S.pageTitle}>Transactions</Text>
+        <Text style={S.countTxt}>{filtered.length} records</Text>
+      </View>
+
       {/* Search */}
       <View style={S.searchWrap}>
-        <Text style={{ fontSize: 16 }}>🔍</Text>
+        <Text style={{ fontSize: 15 }}>🔍</Text>
         <TextInput style={S.searchInput} placeholder="Search narration or reference…"
           placeholderTextColor={C.text4} value={search} onChangeText={setSearch} returnKeyType="search" />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')} style={{ padding: 4 }}>
-            <Text style={{ fontSize: 13, color: C.text4, fontWeight: '700' }}>✕</Text>
-          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setSearch('')}><Text style={{ fontSize: 13, color: C.text4, fontWeight: '700', padding: 4 }}>✕</Text></TouchableOpacity>
         )}
       </View>
 
       {/* Account filter */}
       {accounts.length > 1 && (
-        <View style={S.chipRow}>
-          <TouchableOpacity style={[S.chip, selAcc === 'all' && S.chipActive]} onPress={() => setSelAcc('all')}>
-            <Text style={[S.chipTxt, selAcc === 'all' && S.chipTxtActive]}>All</Text>
-          </TouchableOpacity>
-          {accounts.map(acc => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8 }}>
+          {[{ id: 'all', account_number: 'All' }, ...accounts].map(acc => (
             <TouchableOpacity key={acc.id} style={[S.chip, selAcc === acc.id && S.chipActive]} onPress={() => setSelAcc(acc.id)}>
-              <Text style={[S.chipTxt, selAcc === acc.id && S.chipTxtActive]} numberOfLines={1}>{acc.account_number}</Text>
+              <Text style={[S.chipTxt, selAcc === acc.id && S.chipTxtActive]}>{acc.account_number}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       )}
 
-      {/* Type filter + count */}
-      <View style={S.filterBar}>
+      {/* Type filter */}
+      <View style={S.filterRow}>
         <View style={S.filterTabs}>
           {FILTERS.map(f => (
             <TouchableOpacity key={f.key} style={[S.filterTab, filter === f.key && S.filterTabActive]} onPress={() => setFilter(f.key)}>
@@ -114,46 +119,30 @@ export default function TransactionsScreen({ customer, tick }) {
             </TouchableOpacity>
           ))}
         </View>
-        <Text style={S.countTxt}>{filtered.length} records</Text>
+        {filtered.length > 0 && (
+          <View style={S.summaryPill}>
+            <Text style={S.summaryIn}>+{GHS(totalIn)}</Text>
+            <Text style={S.summarySep}> / </Text>
+            <Text style={S.summaryOut}>-{GHS(totalOut)}</Text>
+          </View>
+        )}
       </View>
 
-      {/* Summary */}
-      {filtered.length > 0 && (
-        <View style={S.summaryRow}>
-          <View style={S.summaryItem}>
-            <Text style={S.summaryLabel}>Total In</Text>
-            <Text style={[S.summaryVal, { color: C.green }]}>+{GHS(totalIn)}</Text>
-          </View>
-          <View style={S.summaryDiv} />
-          <View style={S.summaryItem}>
-            <Text style={S.summaryLabel}>Total Out</Text>
-            <Text style={[S.summaryVal, { color: C.red }]}>-{GHS(totalOut)}</Text>
-          </View>
-          <View style={S.summaryDiv} />
-          <View style={S.summaryItem}>
-            <Text style={S.summaryLabel}>Net</Text>
-            <Text style={[S.summaryVal, { color: totalIn - totalOut >= 0 ? C.green : C.red }]}>
-              {totalIn - totalOut >= 0 ? '+' : ''}{GHS(totalIn - totalOut)}
-            </Text>
-          </View>
-        </View>
-      )}
-
       {loading ? (
-        <View style={S.center}>
-          <ActivityIndicator color={C.brand} size="large" />
-          <Text style={S.loadTxt}>Loading transactions…</Text>
-        </View>
+        <View style={S.center}><ActivityIndicator color={C.brand} size="large" /></View>
       ) : (
-        <FlatList data={filtered} keyExtractor={i => i.id} renderItem={renderItem}
-          contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 32 }}
+        <FlatList
+          data={sections}
+          keyExtractor={([date]) => date}
+          renderItem={({ item }) => renderSection(item)}
+          contentContainerStyle={{ paddingBottom: 32 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={C.brand} />}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={S.empty}>
               <Text style={{ fontSize: 40, marginBottom: 14 }}>📋</Text>
               <Text style={S.emptyTitle}>No transactions found</Text>
-              <Text style={S.emptyHint}>{search || filter !== 'all' ? 'Try adjusting your filters' : 'Your transaction history will appear here'}</Text>
+              <Text style={S.emptyHint}>{search || filter !== 'all' ? 'Try adjusting your filters' : 'Your history will appear here'}</Text>
             </View>
           }
         />
@@ -164,37 +153,35 @@ export default function TransactionsScreen({ customer, tick }) {
 
 const S = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 60 },
-  loadTxt: { color: C.text3, fontSize: 13 },
-  searchWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, margin: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: C.border, gap: 10, ...C.shadowSm },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.borderLt },
+  pageTitle: { fontSize: 22, fontWeight: '900', color: C.text },
+  countTxt: { fontSize: 12, color: C.text4, fontWeight: '600' },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white, margin: 16, marginBottom: 8, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: C.border, gap: 10, ...C.shadowSm },
   searchInput: { flex: 1, fontSize: 14, color: C.text },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, gap: 8, marginBottom: 10 },
-  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
+  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
   chipActive: { backgroundColor: C.brand, borderColor: C.brand },
   chipTxt: { fontSize: 12, fontWeight: '600', color: C.text3 },
   chipTxtActive: { color: '#fff' },
-  filterBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 10 },
-  filterTabs: { flexDirection: 'row', backgroundColor: C.card, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: C.border },
+  filterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
+  filterTabs: { flexDirection: 'row', backgroundColor: C.white, borderRadius: 12, padding: 3, borderWidth: 1, borderColor: C.border },
   filterTab: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 10 },
   filterTabActive: { backgroundColor: C.brand },
   filterTxt: { fontSize: 13, fontWeight: '600', color: C.text3 },
   filterTxtActive: { color: '#fff', fontWeight: '700' },
-  countTxt: { fontSize: 12, color: C.text4, fontWeight: '600' },
-  summaryRow: { flexDirection: 'row', backgroundColor: C.card, marginHorizontal: 16, borderRadius: 14, padding: 14, marginBottom: 6, borderWidth: 1, borderColor: C.borderLt, ...C.shadowSm },
-  summaryItem: { flex: 1, alignItems: 'center' },
-  summaryDiv: { width: 1, backgroundColor: C.borderLt },
-  summaryLabel: { fontSize: 10, color: C.text4, marginBottom: 4, fontWeight: '600', textTransform: 'uppercase' },
-  summaryVal: { fontSize: 13, fontWeight: '800' },
-  txnCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: C.borderLt, ...C.shadowSm },
-  txnIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  summaryPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.borderLt },
+  summaryIn: { fontSize: 12, fontWeight: '700', color: C.green },
+  summarySep: { fontSize: 12, color: C.text4 },
+  summaryOut: { fontSize: 12, fontWeight: '700', color: C.red },
+  dateHeader: { fontSize: 11, fontWeight: '700', color: C.text4, textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: C.bg },
+  txnCard: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: C.borderLt, backgroundColor: C.white },
+  txnDot: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   txnArrow: { fontSize: 18, fontWeight: '800' },
-  txnNarr: { fontSize: 13, fontWeight: '600', color: C.text, marginBottom: 3, lineHeight: 18 },
-  txnMeta: { fontSize: 11, color: C.text4, marginBottom: 2 },
-  txnDate: { fontSize: 11, color: C.text4 },
-  txnAmt: { fontSize: 15, fontWeight: '800', marginBottom: 3 },
+  txnNarr: { fontSize: 13, fontWeight: '600', color: C.text, marginBottom: 2 },
+  txnMeta: { fontSize: 11, color: C.text4, marginBottom: 1 },
+  txnTime: { fontSize: 11, color: C.text4 },
+  txnAmt: { fontSize: 14, fontWeight: '800', marginBottom: 2 },
   txnBal: { fontSize: 11, color: C.text4 },
-  channelBadge: { marginTop: 4, backgroundColor: C.surface, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1, borderColor: C.border },
-  channelTxt: { fontSize: 10, color: C.text3, fontWeight: '600', textTransform: 'capitalize' },
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyTitle: { fontSize: 16, fontWeight: '700', color: C.text3, marginBottom: 6 },
   emptyHint: { fontSize: 13, color: C.text4, textAlign: 'center' },

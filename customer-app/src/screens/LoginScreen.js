@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -40,47 +39,52 @@ export default function LoginScreen({ onLogin }) {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={S.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Brand */}
-          <View style={S.brand}>
-            <View style={S.logoRing}>
-              <View style={S.logo}><Text style={S.logoTxt}>M</Text></View>
+          {/* Top green wave area */}
+          <View style={S.topArea}>
+            <View style={S.logoBox}>
+              <Text style={S.logoTxt}>ML</Text>
             </View>
-            <Text style={S.appName}>Majupat Love Enterprise</Text>
-            <Text style={S.appSub}>Customer Banking Portal</Text>
+            <Text style={S.appName}>Majupat Love</Text>
+            <Text style={S.appSub}>Enterprise Banking</Text>
           </View>
 
-          {/* Card */}
+          {/* White card */}
           <View style={S.card}>
-            <Text style={S.cardTitle}>Welcome back</Text>
-            <Text style={S.cardSub}>Sign in to access your accounts</Text>
+            <Text style={S.cardTitle}>Sign In</Text>
+            <Text style={S.cardSub}>Access your accounts securely</Text>
 
-            <Text style={S.label}>Username</Text>
-            <View style={S.inputWrap}>
-              <Text style={S.inputIcon}>👤</Text>
-              <TextInput style={S.input} placeholder="Enter your username"
-                placeholderTextColor="#475569" value={username} onChangeText={setUsername}
-                autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
+            <View style={S.field}>
+              <Text style={S.fieldLabel}>USERNAME</Text>
+              <View style={S.inputRow}>
+                <Text style={S.fieldIcon}>👤</Text>
+                <TextInput style={S.input} placeholder="Enter username"
+                  placeholderTextColor={C.text4} value={username} onChangeText={setUsername}
+                  autoCapitalize="none" autoCorrect={false} returnKeyType="next" />
+              </View>
             </View>
 
-            <Text style={S.label}>Password</Text>
-            <View style={S.inputWrap}>
-              <Text style={S.inputIcon}>🔒</Text>
-              <TextInput style={S.input} placeholder="Enter your password"
-                placeholderTextColor="#475569" value={password} onChangeText={setPassword}
-                secureTextEntry={!showPass} returnKeyType="done" onSubmitEditing={handleLogin} />
-              <TouchableOpacity onPress={() => setShowPass(p => !p)} style={S.eyeBtn}>
-                <Text style={{ fontSize: 16 }}>{showPass ? '🙈' : '👁️'}</Text>
-              </TouchableOpacity>
+            <View style={S.field}>
+              <Text style={S.fieldLabel}>PASSWORD</Text>
+              <View style={S.inputRow}>
+                <Text style={S.fieldIcon}>🔑</Text>
+                <TextInput style={S.input} placeholder="Enter password"
+                  placeholderTextColor={C.text4} value={password} onChangeText={setPassword}
+                  secureTextEntry={!showPass} returnKeyType="done" onSubmitEditing={handleLogin} />
+                <TouchableOpacity onPress={() => setShowPass(p => !p)} style={S.eyeBtn}>
+                  <Text style={{ fontSize: 15, color: C.text4 }}>{showPass ? '🙈' : '👁️'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <TouchableOpacity style={[S.btn, loading && { opacity: 0.7 }]} onPress={handleLogin} disabled={loading} activeOpacity={0.85}>
               {loading
                 ? <ActivityIndicator color="#fff" />
-                : <Text style={S.btnTxt}>Sign In  →</Text>}
+                : <Text style={S.btnTxt}>Sign In</Text>}
             </TouchableOpacity>
+
+            <Text style={S.hint}>Forgot your password? Contact your branch for assistance.</Text>
           </View>
 
-          <Text style={S.hint}>Forgot your password? Contact your branch for assistance.</Text>
           <Text style={S.powered}>Powered by Maxbraynn Technology & Systems</Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -89,24 +93,24 @@ export default function LoginScreen({ onLogin }) {
 }
 
 const S = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.navyMid },
-  scroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 32 },
-  brand: { alignItems: 'center', marginBottom: 36 },
-  logoRing: { width: 112, height: 112, borderRadius: 32, borderWidth: 1.5, borderColor: 'rgba(26,86,219,0.4)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  logo: { width: 88, height: 88, borderRadius: 26, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center', shadowColor: C.brand, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12 },
-  logoTxt: { color: '#fff', fontSize: 44, fontWeight: '900' },
-  appName: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 6, letterSpacing: -0.3 },
-  appSub: { color: '#475569', fontSize: 13, fontWeight: '500' },
-  card: { width: '100%', backgroundColor: '#111827', borderRadius: 20, padding: 24, borderWidth: 1, borderColor: '#1e293b', marginBottom: 20 },
-  cardTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 6 },
-  cardSub: { color: '#475569', fontSize: 13, marginBottom: 28 },
-  label: { color: '#64748b', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, paddingHorizontal: 14, marginBottom: 20, gap: 10 },
-  inputIcon: { fontSize: 16 },
-  input: { flex: 1, paddingVertical: 14, fontSize: 15, color: '#f1f5f9' },
+  root: { flex: 1, backgroundColor: C.brand },
+  scroll: { flexGrow: 1 },
+  topArea: { alignItems: 'center', paddingTop: 48, paddingBottom: 40, paddingHorizontal: 24 },
+  logoBox: { width: 80, height: 80, borderRadius: 24, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 16, elevation: 8 },
+  logoTxt: { color: C.brand, fontSize: 28, fontWeight: '900' },
+  appName: { color: '#fff', fontSize: 26, fontWeight: '900', letterSpacing: -0.5, marginBottom: 4 },
+  appSub: { color: 'rgba(255,255,255,0.75)', fontSize: 14, fontWeight: '500' },
+  card: { backgroundColor: '#fff', borderTopLeftRadius: 32, borderTopRightRadius: 32, flex: 1, padding: 28, paddingTop: 32, minHeight: 460 },
+  cardTitle: { fontSize: 26, fontWeight: '900', color: C.text, marginBottom: 6 },
+  cardSub: { fontSize: 14, color: C.text3, marginBottom: 32 },
+  field: { marginBottom: 20 },
+  fieldLabel: { fontSize: 11, fontWeight: '700', color: C.text4, letterSpacing: 0.8, marginBottom: 8 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 14, paddingHorizontal: 14, borderWidth: 1.5, borderColor: C.border, gap: 10 },
+  fieldIcon: { fontSize: 16 },
+  input: { flex: 1, paddingVertical: 14, fontSize: 15, color: C.text },
   eyeBtn: { padding: 6 },
-  btn: { backgroundColor: C.brand, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 4, shadowColor: C.brand, shadowOpacity: 0.4, shadowRadius: 12, elevation: 6 },
+  btn: { backgroundColor: C.brand, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8, marginBottom: 20 },
   btnTxt: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
-  hint: { color: '#334155', fontSize: 12, textAlign: 'center', lineHeight: 18, marginBottom: 12 },
-  powered: { color: '#1e293b', fontSize: 11, textAlign: 'center' },
+  hint: { fontSize: 12, color: C.text4, textAlign: 'center', lineHeight: 18 },
+  powered: { color: 'rgba(255,255,255,0.4)', fontSize: 11, textAlign: 'center', paddingVertical: 20, backgroundColor: C.brand },
 });
