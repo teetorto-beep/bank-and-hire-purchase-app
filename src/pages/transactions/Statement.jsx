@@ -164,14 +164,14 @@ export default function Statement() {
       createdAt: p.created_at || '',
     }));
 
-    const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
-    const to   = dateTo   ? new Date(dateTo   + 'T23:59:59') : null;
+    // dateFrom and dateTo are "YYYY-MM-DD" strings used directly for comparison
 
     const periodTxns = acctTxns.filter(t => {
-      if (!t.createdAt) return true; // include if no date
-      const d = new Date(t.createdAt);
-      if (isNaN(d.getTime())) return true; // include if invalid date
-      return (!from || d >= from) && (!to || d <= to);
+      if (!t.createdAt) return true;
+      // Use string slice for reliable date comparison (avoids timezone issues)
+      const d = t.createdAt.slice(0, 10); // "YYYY-MM-DD"
+      if (!d || d.length < 10) return true;
+      return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo);
     });
 
     // ── Classify transactions ─────────────────────────────────────────────
@@ -191,7 +191,10 @@ export default function Statement() {
 
     // ── Compute opening balance ───────────────────────────────────────────
     const currentBalance = Number(selectedAccount.balance || 0);
-    const txnsAfterPeriod = acctTxns.filter(t => to && new Date(t.createdAt) > to);
+    const txnsAfterPeriod = acctTxns.filter(t => {
+      if (!t.createdAt || !dateTo) return false;
+      return t.createdAt.slice(0, 10) > dateTo;
+    });
     let closingBalance = currentBalance;
     for (const t of txnsAfterPeriod) {
       if (isCollectorCashPayment(t)) continue;
