@@ -93,15 +93,10 @@ export default function TellerSession() {
   const searchResults = useMemo(() => {
     if (!search || search.length < 2) return [];
     const q = search.toLowerCase();
-    return (accounts || []).filter(a => {
-      const cust = (customers || []).find(c => c.id === a.customerId);
-      return (
-        a.accountNumber?.toLowerCase().includes(q) ||
-        cust?.name?.toLowerCase().includes(q) ||
-        cust?.phone?.toLowerCase().includes(q)
-      );
-    }).slice(0, 8);
-  }, [search, accounts, customers]);
+    return (accounts || []).filter(a =>
+      a.accountNumber?.toLowerCase().includes(q)
+    ).slice(0, 8);
+  }, [search, accounts]);
 
   const getCustomer = (acc) => (customers || []).find(c => c.id === acc?.customerId);
 
