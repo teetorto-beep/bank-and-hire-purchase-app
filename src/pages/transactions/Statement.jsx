@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { Search, Download, Printer, FileText, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { exportStatementPDF, exportCSV } from '../../core/export';
+import { supabase } from '../../core/supabase';
 
 const GHS = (n) => `GH\u20B5 ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -80,92 +81,132 @@ export default function Statement() {
   const generate = async () => {
     if (!selectedAccount) return;
     setGenerating(true);
-    // Always fetch latest data before generating
-    await refresh();
-    setTimeout(() => {
-      const acctTxns = transactions
-        .filter(t => t.accountId === selectedAccount.id)
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-      const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
-      const to   = dateTo   ? new Date(dateTo   + 'T23:59:59') : null;
+    // ── Fetch fresh data directly from DB — avoids stale React state ─────
+    const [txnRes, loanRes, hpRes] = await Promise.all([
+      supabase
+        .from('transactions')
+        .select('*')
+        .eq('account_id', selectedAccount.id)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('loans')
+        .select('*')
+        .eq('account_id', selectedAccount.id),
+      supabase
+        .from('hp_agreements')
+        .select('*')
+        .eq('customer_id', selectedCustomer?.id),
+    ]);
 
-      const periodTxns = acctTxns.filter(t => {
-        const d = new Date(t.createdAt);
-        return (!from || d >= from) && (!to || d <= to);
-      });
+    const acctTxns = (txnRes.data || []).map(t => ({
+      ...t,
+      id: t.id,
+      accountId: t.account_id,
+      type: t.type,
+      amount: Number(t.amount || 0),
+      narration: t.narration || '',
+      reference: t.reference || '',
+      balanceAfter: Number(t.balance_after || 0),
+      channel: t.channel || 'teller',
+      loanId: t.loan_id || null,
+      hpAgreementId: t.hp_agreement_id || null,
+      reversed: t.reversed || false,
+      createdAt: t.created_at || '',
+      posterName: t.poster_name || '—',
+    }));
 
-      // ── Classify transactions ─────────────────────────────────────────────
-      // Collector cash payments (debit + channel=collection) do NOT affect
-      // the account balance — cash is collected in the field, not from account.
-      const isCollectorCashPayment = (t) =>
-        t.type === 'debit' && t.channel === 'collection';
+    const acctLoans = (loanRes.data || []).map(l => ({
+      ...l,
+      id: l.id,
+      accountId: l.account_id,
+      type: l.type || '',
+      amount: Number(l.amount || 0),
+      outstanding: Number(l.outstanding || 0),
+      interestRate: Number(l.interest_rate || 0),
+      tenure: Number(l.tenure || 0),
+      monthlyPayment: Number(l.monthly_payment || 0),
+      status: l.status || 'active',
+      hpAgreementId: l.hp_agreement_id || null,
+      itemName: l.item_name || '',
+      disbursedAt: l.disbursed_at || null,
+    }));
 
-      // Loan-related = collector cash + any teller loan/HP/offset transactions
-      const isLoanRelated = (t) =>
-        isCollectorCashPayment(t) ||
-        (t.narration || '').toLowerCase().includes('loan repayment') ||
-        (t.narration || '').toLowerCase().includes('hp repayment') ||
-        (t.narration || '').toLowerCase().includes('loan offset') ||
-        !!(t.loanId || t.loan_id) ||
-        !!(t.hpAgreementId || t.hp_agreement_id);
+    const acctHP = (hpRes.data || []).map(a => ({
+      ...a,
+      id: a.id,
+      customerId: a.customer_id,
+      itemName: a.item_name || '',
+      totalPrice: Number(a.total_price || 0),
+      downPayment: Number(a.down_payment || 0),
+      totalPaid: Number(a.total_paid || 0),
+      remaining: Number(a.remaining || 0),
+      suggestedPayment: Number(a.suggested_payment || 0),
+      paymentFrequency: a.payment_frequency || 'monthly',
+      status: a.status || 'active',
+      loanId: a.loan_id || null,
+    }));
 
-      // ALL period transactions go into the main statement table
-      const loanTxns = periodTxns.filter(t => isLoanRelated(t));
+    const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
+    const to   = dateTo   ? new Date(dateTo   + 'T23:59:59') : null;
 
-      // ALL-time loan-related txns for the account (for accurate repayment totals)
-      const allLoanTxns = acctTxns.filter(t => isLoanRelated(t));
+    const periodTxns = acctTxns.filter(t => {
+      const d = new Date(t.createdAt);
+      return (!from || d >= from) && (!to || d <= to);
+    });
 
-      // ── Compute opening balance reliably ──────────────────────────────────
-      const currentBalance = Number(selectedAccount.balance || 0);
-      const txnsAfterPeriod = acctTxns.filter(t => {
-        if (!to) return false;
-        return new Date(t.createdAt) > to;
-      });
-      let closingBalance = currentBalance;
-      for (const t of txnsAfterPeriod) {
-        if (isCollectorCashPayment(t)) continue;
-        if (t.type === 'credit') closingBalance -= t.amount;
-        else closingBalance += t.amount;
+    // ── Classify transactions ─────────────────────────────────────────────
+    const isCollectorCashPayment = (t) =>
+      t.type === 'debit' && t.channel === 'collection';
+
+    const isLoanRelated = (t) =>
+      isCollectorCashPayment(t) ||
+      (t.narration || '').toLowerCase().includes('loan repayment') ||
+      (t.narration || '').toLowerCase().includes('hp repayment') ||
+      (t.narration || '').toLowerCase().includes('loan offset') ||
+      !!(t.loanId || t.loan_id) ||
+      !!(t.hpAgreementId || t.hp_agreement_id);
+
+    const loanTxns    = periodTxns.filter(t => isLoanRelated(t));
+    const allLoanTxns = acctTxns.filter(t => isLoanRelated(t));
+
+    // ── Compute opening balance ───────────────────────────────────────────
+    const currentBalance = Number(selectedAccount.balance || 0);
+    const txnsAfterPeriod = acctTxns.filter(t => to && new Date(t.createdAt) > to);
+    let closingBalance = currentBalance;
+    for (const t of txnsAfterPeriod) {
+      if (isCollectorCashPayment(t)) continue;
+      if (t.type === 'credit') closingBalance -= t.amount;
+      else closingBalance += t.amount;
+    }
+
+    const totalCredits = periodTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+    const totalDebits  = periodTxns.filter(t => t.type === 'debit' && !isCollectorCashPayment(t)).reduce((s, t) => s + t.amount, 0);
+    const openingBalance = closingBalance - totalCredits + totalDebits;
+
+    let runningBal = openingBalance;
+    const allTxnsWithBal = periodTxns.map(t => {
+      if (isCollectorCashPayment(t)) {
+        return { ...t, computedBalance: runningBal, balanceUnchanged: true };
       }
+      if (t.type === 'credit') runningBal += t.amount;
+      else runningBal -= t.amount;
+      return { ...t, computedBalance: runningBal };
+    });
 
-      const totalCredits = periodTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-      const totalDebits  = periodTxns.filter(t => t.type === 'debit' && !isCollectorCashPayment(t)).reduce((s, t) => s + t.amount, 0);
-      const openingBalance = closingBalance - totalCredits + totalDebits;
-
-      // Recompute running balance for ALL transactions in order
-      let runningBal = openingBalance;
-      const allTxnsWithBal = periodTxns.map(t => {
-        if (isCollectorCashPayment(t)) {
-          return { ...t, computedBalance: runningBal, balanceUnchanged: true };
-        }
-        if (t.type === 'credit') runningBal += t.amount;
-        else runningBal -= t.amount;
-        return { ...t, computedBalance: runningBal };
-      });
-
-      const acctLoans = loans.filter(l =>
-        l.accountId === selectedAccount.id || l.account_id === selectedAccount.id
-      );
-
-      const acctHP = hpAgreements.filter(a =>
-        a.customerId === selectedCustomer?.id || a.customer_id === selectedCustomer?.id
-      );
-
-      setStatement({
-        account: selectedAccount,
-        customer: selectedCustomer,
-        dateFrom, dateTo,
-        generatedAt: new Date().toISOString(),
-        transactions: allTxnsWithBal,
-        loanTransactions: loanTxns,
-        allLoanTxns,           // all-time for repayment totals
-        acctLoans,
-        acctHP,
-        openingBalance, totalCredits, totalDebits, closingBalance,
-      });
-      setGenerating(false);
-    }, 300);
+    setStatement({
+      account: selectedAccount,
+      customer: selectedCustomer,
+      dateFrom, dateTo,
+      generatedAt: new Date().toISOString(),
+      transactions: allTxnsWithBal,
+      loanTransactions: loanTxns,
+      allLoanTxns,
+      acctLoans,
+      acctHP,
+      openingBalance, totalCredits, totalDebits, closingBalance,
+    });
+    setGenerating(false);
   };
 
   const handlePrint = () => {
