@@ -74,6 +74,12 @@ export default function TellerSession() {
   const [fromDate, setFromDate] = useState(today);
   const [toDate, setToDate] = useState(today);
 
+  // --- My History state ---
+  const [histSearch, setHistSearch] = useState('');
+  const [histDateFrom, setHistDateFrom] = useState(today);
+  const [histDateTo, setHistDateTo] = useState(today);
+  const [histType, setHistType] = useState('all');
+
   // --- Closing Entry state ---
   const [glCode, setGlCode] = useState('1020');
   const [glAmount, setGlAmount] = useState('');
@@ -111,8 +117,31 @@ export default function TellerSession() {
     });
   }, [transactions, currentUser, fromDate, toDate]);
 
-  const openingBalance = useMemo(() => {
-    // Sum of account balances before the period — approximate as first balance in period
+  // My History: searchable/filterable list of this teller's transactions
+  const historyTxns = useMemo(() => {
+    if (!transactions) return [];
+    return transactions.filter(t => {
+      const d = (t.createdAt || '').slice(0, 10);
+      const matchDate = (!histDateFrom || d >= histDateFrom) && (!histDateTo || d <= histDateTo);
+      const matchType = histType === 'all' || t.type === histType;
+      const isMine = t.createdBy === currentUser?.id || t.posterName === currentUser?.name;
+      if (!isMine) return false;
+      if (!matchDate || !matchType) return false;
+      if (!histSearch.trim()) return true;
+      const q = histSearch.trim().toLowerCase();
+      const acc = (accounts || []).find(a => a.id === t.accountId);
+      const cust = (customers || []).find(c => c.id === acc?.customerId);
+      return (
+        (t.reference || '').toLowerCase().includes(q) ||
+        (t.narration || '').toLowerCase().includes(q) ||
+        (acc?.accountNumber || '').toLowerCase().includes(q) ||
+        (cust?.name || '').toLowerCase().includes(q) ||
+        String(t.amount || '').includes(q)
+      );
+    }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [transactions, currentUser, histSearch, histDateFrom, histDateTo, histType, accounts, customers]);
+
+  const openingBalance = useMemo(() => {    // Sum of account balances before the period — approximate as first balance in period
     return 0; // Placeholder; real impl would need historical snapshots
   }, [reportTxns]);
 
@@ -314,6 +343,20 @@ export default function TellerSession() {
     win.print();
   };
 
+  const reprintReceipt = (t) => {
+    const acc  = (accounts || []).find(a => a.id === t.accountId);
+    const cust = (customers || []).find(c => c.id === acc?.customerId);
+    printReceipt({
+      ref:          t.reference || t.id,
+      account:      acc,
+      customer:     cust,
+      type:         t.type,
+      amount:       t.amount,
+      balanceAfter: t.balanceAfter,
+      tellerName:   t.posterName || currentUser?.name || 'Teller',
+    });
+  };
+
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -328,8 +371,9 @@ export default function TellerSession() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '2px solid #1e293b' }}>
         {[
-          { key: 'post', label: 'Post Transaction' },
-          { key: 'report', label: 'My Report' },
+          { key: 'post',    label: 'Post Transaction' },
+          { key: 'history', label: 'My History' },
+          { key: 'report',  label: 'My Report' },
           { key: 'closing', label: 'Closing Entry' },
         ].map(t => (
           <button
@@ -525,6 +569,111 @@ export default function TellerSession() {
                   <div>Receipt will appear here after a successful transaction.</div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MY HISTORY TAB ===== */}
+      {tab === 'history' && (
+        <div>
+          {/* Filters */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ padding: '14px 20px', display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 220px' }}>
+                <label className="form-label">Search</label>
+                <input className="form-control" placeholder="Reference, account, name, amount…"
+                  value={histSearch} onChange={e => setHistSearch(e.target.value)} />
+              </div>
+              <div>
+                <label className="form-label">From</label>
+                <input type="date" className="form-control" value={histDateFrom}
+                  onChange={e => setHistDateFrom(e.target.value)} style={{ width: 145 }} />
+              </div>
+              <div>
+                <label className="form-label">To</label>
+                <input type="date" className="form-control" value={histDateTo}
+                  onChange={e => setHistDateTo(e.target.value)} style={{ width: 145 }} />
+              </div>
+              <div>
+                <label className="form-label">Type</label>
+                <select className="form-control" value={histType} onChange={e => setHistType(e.target.value)} style={{ width: 130 }}>
+                  <option value="all">All</option>
+                  <option value="credit">Credits</option>
+                  <option value="debit">Debits</option>
+                </select>
+              </div>
+              <div style={{ paddingBottom: 2 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{historyTxns.length} transaction{historyTxns.length !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Transaction list */}
+          <div className="card">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date & Time</th>
+                    <th>Reference</th>
+                    <th>Account</th>
+                    <th>Customer</th>
+                    <th>Narration</th>
+                    <th>Type</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th style={{ textAlign: 'right' }}>Balance After</th>
+                    <th style={{ textAlign: 'center' }}>Reprint</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyTxns.length === 0 ? (
+                    <tr><td colSpan={9} className="table-empty">No transactions found</td></tr>
+                  ) : historyTxns.map((t, idx) => {
+                    const acc  = (accounts || []).find(a => a.id === t.accountId);
+                    const cust = (customers || []).find(c => c.id === acc?.customerId);
+                    return (
+                      <tr key={t.id} style={{ background: idx % 2 === 0 ? '#fff' : 'var(--surface)', opacity: t.reversed ? 0.5 : 1 }}>
+                        <td style={{ fontSize: 12, whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+                          {t.createdAt ? new Date(t.createdAt).toLocaleString('en-GH') : '—'}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.reference}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{acc?.accountNumber || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{cust?.name || '—'}</td>
+                        <td style={{ fontSize: 12, maxWidth: 180 }}>{t.narration}</td>
+                        <td>
+                          <span className={`badge badge-${t.type === 'credit' ? 'green' : 'red'}`}>{t.type}</span>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: t.type === 'credit' ? 'var(--green)' : 'var(--red)', whiteSpace: 'nowrap' }}>
+                          {t.type === 'credit' ? '+' : '-'}{GHS(t.amount)}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{GHS(t.balanceAfter)}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button className="btn btn-ghost btn-sm" title="Reprint receipt"
+                            onClick={() => reprintReceipt(t)}>
+                            <Printer size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {historyTxns.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: '#1e293b' }}>
+                      <td colSpan={6} style={{ padding: '10px 12px', color: '#fff', fontWeight: 700 }}>TOTALS</td>
+                      <td style={{ textAlign: 'right', fontWeight: 800, padding: '10px 12px', whiteSpace: 'nowrap', color: '#86efac' }}>
+                        {GHS(historyTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0))}
+                        {' / '}
+                        <span style={{ color: '#fca5a5' }}>
+                          {GHS(historyTxns.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0))}
+                        </span>
+                      </td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
             </div>
           </div>
         </div>
