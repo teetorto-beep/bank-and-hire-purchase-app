@@ -59,7 +59,9 @@
     ],
     "owner": "majupat",
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "f1274835-fc27-42be-98fa-8f4ae0320835"
+      }
     }
   }
 }

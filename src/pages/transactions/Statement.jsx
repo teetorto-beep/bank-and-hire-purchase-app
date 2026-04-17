@@ -100,9 +100,15 @@ export default function Statement() {
       supabase
         .from('hp_payments')
         .select('*')
-        .eq('customer_id', selectedCustomer?.id)
+        .in('agreement_id', [])  // placeholder — fetched below after hp agreements load
         .order('created_at', { ascending: false }),
     ]);
+
+    // Fetch hp_payments using agreement IDs from the hp agreements result
+    const hpAgreementIds = (hpRes.data || []).map(a => a.id);
+    const hpPayRes2 = hpAgreementIds.length > 0
+      ? await supabase.from('hp_payments').select('*').in('agreement_id', hpAgreementIds).order('created_at', { ascending: false })
+      : { data: [] };
 
     const acctTxns = (txnRes.data || []).map(t => ({
       ...t,
@@ -152,7 +158,7 @@ export default function Statement() {
       loanId: a.loan_id || null,
     }));
 
-    const hpPayments = (hpPayRes.data || []).map(p => ({
+    const hpPayments = (hpPayRes2.data || []).map(p => ({
       ...p,
       id: p.id,
       agreementId: p.agreement_id,
@@ -167,7 +173,9 @@ export default function Statement() {
     const to   = dateTo   ? new Date(dateTo   + 'T23:59:59') : null;
 
     const periodTxns = acctTxns.filter(t => {
+      if (!t.createdAt) return true; // include if no date
       const d = new Date(t.createdAt);
+      if (isNaN(d.getTime())) return true; // include if invalid date
       return (!from || d >= from) && (!to || d <= to);
     });
 
