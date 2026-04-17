@@ -636,16 +636,15 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     </div>
 
                     {/* Loan figures */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 0, background: '#fff' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 0, background: '#fff' }}>
                       {[
-                        ['Principal',       GHS(principal),                                '#0f172a'],
-                        ['Rate',            `${loan.interestRate}%`,                       '#475569'],
-                        ['Monthly',         GHS(monthly),                                  '#1d4ed8'],
-                        ['Total Repayable', GHS(totalRepay),                               '#1d4ed8'],
-                        ['Total Repaid',    GHS(Math.max(0, principal - Number(loan.outstanding || 0))), '#16a34a'],
-                        ['Outstanding',     GHS(loan.outstanding),                         Number(loan.outstanding) > 0 ? '#dc2626' : '#16a34a'],
+                        ['Principal',       GHS(principal),        '#0f172a'],
+                        ['Rate',            `${loan.interestRate}%`,'#475569'],
+                        ['Monthly',         GHS(monthly),          '#1d4ed8'],
+                        ['Total Repayable', GHS(totalRepay),       '#1d4ed8'],
+                        ['Outstanding',     GHS(loan.outstanding), Number(loan.outstanding) > 0 ? '#dc2626' : '#16a34a'],
                       ].map(([k, v, col], i) => (
-                        <div key={k} style={{ padding: '10px 14px', borderRight: i < 5 ? '1px solid #fde68a' : 'none', borderTop: '1px solid #fde68a' }}>
+                        <div key={k} style={{ padding: '10px 14px', borderRight: i < 4 ? '1px solid #fde68a' : 'none', borderTop: '1px solid #fde68a' }}>
                           <div style={{ fontSize: 10, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>{k}</div>
                           <div style={{ fontSize: 13, fontWeight: 800, color: col }}>{v}</div>
                         </div>
