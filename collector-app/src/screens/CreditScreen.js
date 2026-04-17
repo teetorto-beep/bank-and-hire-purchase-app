@@ -159,18 +159,24 @@ export default function CreditScreen({ collector }) {
       }
 
       // ── Check approval rules ──────────────────────────────────────────
-      const { data: settingsRow } = await supabase
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'approval_rules')
-        .single();
-      const rules = settingsRow?.value || {};
-      const isSavingsCredit = paymentType === 'savings';
-      const ruleKey = isSavingsCredit ? 'credit_threshold' : 'debit_threshold';
-      const rule = rules[ruleKey];
-      const needsApproval = rule?.enabled &&
-        (rule.roles || []).includes('collector') &&
-        amt >= (rule.amount || 0);
+      let needsApproval = false;
+      try {
+        const { data: settingsRow } = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'approval_rules')
+          .single();
+        const rules = settingsRow?.value || {};
+        const isSavingsCredit = paymentType === 'savings';
+        const ruleKey = isSavingsCredit ? 'credit_threshold' : 'debit_threshold';
+        const rule = rules[ruleKey];
+        needsApproval = !!(rule?.enabled &&
+          (rule.roles || []).includes('collector') &&
+          amt >= (rule.amount || 0));
+      } catch (_) {
+        // If rules can't be loaded, allow posting
+        needsApproval = false;
+      }
 
       if (needsApproval) {
         // Submit to pending_approvals instead of posting

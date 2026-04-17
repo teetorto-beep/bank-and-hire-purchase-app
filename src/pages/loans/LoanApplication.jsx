@@ -5,6 +5,7 @@ import {
   ArrowLeft, CheckCircle, Search, AlertCircle,
   ShoppingBag, Package, Edit2, X, CreditCard, TrendingUp,
 } from 'lucide-react';
+import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
 import { authDB } from '../../core/db';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -137,6 +138,7 @@ export default function LoanApplication() {
   }, [customers, custSearch]);
 
   // ── Submit ──────────────────────────────────────────────────────────────────
+  // For UI display — tellers always show "Submit for Approval" button label
   const willAuth = isTeller || form.requireAuth;
 
   const handleSubmit = async (e) => {
@@ -150,6 +152,10 @@ export default function LoanApplication() {
 
     setSubmitting(true);
     try {
+      // Check loan_creation approval rule from DB
+      const rules = await loadApprovalRules();
+      const role  = user?.role || 'teller';
+      const needsApproval = requiresApproval('loan_creation', role, 0, rules) || form.requireAuth;
       if (isHP) {
         if (!form.itemId) { setError('Please select an item from the catalogue.'); setSubmitting(false); return; }
         const payload = {
@@ -183,8 +189,8 @@ export default function LoanApplication() {
         const { data, error: err } = await addLoan(payload);
         if (err) throw new Error(err.message || 'Failed to submit loan application.');
 
-        // If admin/manager and not requiring auth → disburse immediately
-        if (!willAuth && data) {
+        // If no approval needed → disburse immediately
+        if (!needsApproval && data) {
           await updateLoan(data.id, {
             status:        'active',
             disbursed_at:  new Date().toISOString(),
@@ -192,7 +198,7 @@ export default function LoanApplication() {
           });
         }
 
-        setSuccess({ type: 'loan', data, customer: selectedCustomer, product: selectedProduct, pending: willAuth });
+        setSuccess({ type: 'loan', data, customer: selectedCustomer, product: selectedProduct, pending: needsApproval });
       }
     } catch (ex) {
       setError(ex.message);

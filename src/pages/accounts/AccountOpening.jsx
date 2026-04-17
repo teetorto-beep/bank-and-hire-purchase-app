@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ArrowLeft, Search, Package, AlertTriangle, User, Wallet, DollarSign, ClipboardCheck } from 'lucide-react';
+import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
 import { authDB } from '../../core/db';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
@@ -19,7 +20,7 @@ const STEPS = [
 ];
 
 export default function AccountOpening() {
-  const { customers, accounts, products, openAccount, postTransaction, submitForApproval } = useApp();
+  const { customers, accounts, products, openAccount, postTransaction, submitForApproval, submitApproval } = useApp();
   const navigate = useNavigate();
   const user = authDB.currentUser();
   const isTeller = user?.role === 'teller';
@@ -82,6 +83,27 @@ export default function AccountOpening() {
     if (hasDuplicate) { setError('Duplicate account not allowed.'); return; }
     setSaving(true); setError('');
     try {
+      // Check account_opening approval rule
+      const rules = await loadApprovalRules();
+      const role  = user?.role || 'teller';
+      const needsApproval = requiresApproval('account_opening', role, 0, rules);
+
+      if (needsApproval) {
+        // Submit for approval instead of opening directly
+        await submitApproval('account', {
+          customerId:    form.customerId,
+          type:          selectedProduct.category,
+          interestRate:  selectedProduct.interest_rate ?? selectedProduct.interestRate ?? 0,
+          initialDeposit: parseFloat(form.initialDeposit) || 0,
+          depositNarration: form.depositNarration || 'Initial Deposit',
+          productName:   selectedProduct.name,
+          customerName:  (customers || []).find(c => c.id === form.customerId)?.name || '—',
+        });
+        setCreated({ pending: true });
+        setSaving(false);
+        return;
+      }
+
       const { data: acc, error: accErr } = await openAccount({
         customerId: form.customerId,
         type: selectedProduct.category,
@@ -99,7 +121,8 @@ export default function AccountOpening() {
           narration: form.depositNarration || 'Initial Deposit',
           channel: 'teller',
         };
-        if (isTeller || form.requireAuth) {
+        const creditRules = await loadApprovalRules();
+        if (requiresApproval('credit', role, depositAmt, creditRules)) {
           await submitForApproval(txnData);
         } else {
           await postTransaction(txnData);

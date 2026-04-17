@@ -1581,9 +1581,110 @@ export const approvalsDB = {
           });
         } catch (_) {}
       }
-    }
+    } else if (item.type === 'collection') {
+      // Collector payment that exceeded approval threshold — now post it
+      const p = item.payload || {};
+      const isSavings = p.paymentType === 'savings';
+      const accountId = p.accountId || p.account_id;
+      const amount = Number(p.amount || 0);
 
-    // Mark as approved
+      // Fetch current balance
+      const { data: acc } = await supabase.from('accounts').select('balance').eq('id', accountId).single();
+      if (!acc) return { error: new Error('Account not found') };
+
+      const newBalance = isSavings ? Number(acc.balance) + amount : Number(acc.balance);
+      const ref = `TXN${Date.now()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+      const narration = p.narration || (isSavings
+        ? `Savings Deposit — ${p.collectorName || 'Collector'}`
+        : p.paymentType === 'loan'
+          ? `Loan Repayment (via ${p.collectorName || 'Collector'})`
+          : `HP Repayment (via ${p.collectorName || 'Collector'})`);
+
+      // Post transaction
+      await supabase.from('transactions').insert({
+        account_id:      accountId,
+        type:            isSavings ? 'credit' : 'debit',
+        amount,
+        narration,
+        reference:       ref,
+        balance_after:   newBalance,
+        channel:         'collection',
+        status:          'completed',
+        poster_name:     p.collectorName || 'Collector',
+        created_by:      null,
+        loan_id:         p.loanId || null,
+        hp_agreement_id: p.hpAgreementId || null,
+      });
+
+      // Update account balance for savings
+      if (isSavings) {
+        await supabase.from('accounts').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', accountId);
+      }
+
+      // Reduce loan outstanding
+      if (p.paymentType === 'loan' && p.loanId) {
+        const { data: loan } = await supabase.from('loans').select('outstanding, status').eq('id', p.loanId).single();
+        if (loan) {
+          const newOut = Math.max(0, Number(loan.outstanding) - amount);
+          await supabase.from('loans').update({ outstanding: newOut, status: newOut <= 0 ? 'completed' : loan.status, last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', p.loanId);
+        }
+      }
+
+      // Reduce HP agreement
+      if (p.paymentType === 'hp' && p.hpAgreementId) {
+        const { data: agr } = await supabase.from('hp_agreements').select('total_paid, total_price, loan_id').eq('id', p.hpAgreementId).single();
+        if (agr) {
+          const newPaid = Number(agr.total_paid) + amount;
+          const remaining = Math.max(0, Number(agr.total_price) - newPaid);
+          await supabase.from('hp_agreements').update({ total_paid: newPaid, remaining, status: remaining <= 0 ? 'completed' : 'active', last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', p.hpAgreementId);
+          if (agr.loan_id) {
+            const { data: hpLoan } = await supabase.from('loans').select('outstanding, status').eq('id', agr.loan_id).single();
+            if (hpLoan) {
+              const newOut = Math.max(0, Number(hpLoan.outstanding) - amount);
+              await supabase.from('loans').update({ outstanding: newOut, status: newOut <= 0 ? 'completed' : hpLoan.status, last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', agr.loan_id);
+            }
+          }
+        }
+      }
+
+      // Insert collection record
+      await supabase.from('collections').insert({
+        collector_id:   p.collectorId || null,
+        collector_name: p.collectorName || null,
+        customer_id:    p.customerId || null,
+        customer_name:  p.customerName || null,
+        account_id:     accountId,
+        amount,
+        notes:          p.notes || null,
+        payment_type:   p.paymentType || 'savings',
+        loan_id:        p.loanId || null,
+        hp_agreement_id: p.hpAgreementId || null,
+        status:         'completed',
+      });
+
+      // Notify collector
+      if (item.submitted_by) {
+        try {
+          await supabase.from('notifications').insert({
+            user_id: item.submitted_by,
+            title:   '✅ Collection Approved',
+            message: `Your collection of GH₵ ${amount.toLocaleString('en-GH', { minimumFractionDigits: 2 })} for ${p.customerName || 'customer'} has been approved and posted.`,
+            type:    'success',
+            read:    false,
+          });
+        } catch (_) {}
+      }
+      result = { data: { ref }, error: null };
+
+    } else if (item.type === 'transaction') {
+      // Teller transaction that exceeded approval threshold
+      const p = item.payload || {};
+      result = await transactionsDB.post(
+        { account_id: p.accountId, type: p.type, amount: Number(p.amount), narration: p.narration, channel: p.channel || 'teller' },
+        approverId, approverName
+      );
+      if (result.error) return { error: new Error(`Transaction failed: ${result.error.message}`) };
+    }
     await supabase.from('pending_approvals').update({
       status:        'approved',
       approved_by:   approverId,

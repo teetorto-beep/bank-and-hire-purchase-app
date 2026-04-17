@@ -53,10 +53,17 @@
           }
         }
       ],
-      ["./plugins/withGradleVersion", { "gradleVersion": "8.7" }]
+      [
+        "./plugins/withGradleVersion",
+        {
+          "gradleVersion": "8.7"
+        }
+      ]
     ],
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "51ec7805-cd20-4ff7-8444-c8ae4fb8e6ea"
+      }
     },
     "owner": "majupat"
   }
