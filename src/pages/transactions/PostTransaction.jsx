@@ -28,7 +28,7 @@ const EMPTY_FORM = {
   glCode: '', glType: 'debit',
 };
 
-export default function PostTransaction() {
+export default function PostTransaction({ hideModes = [] }) {
   const { accounts, customers, loans, hpAgreements, postTransaction, submitForApproval, transferFunds, glTransfer } = useApp();
   const navigate = useNavigate();
   const user     = authDB.currentUser();
@@ -384,7 +384,7 @@ export default function PostTransaction() {
             <div className="form-group">
               <label className="form-label">Transaction Type</label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {PAYMENT_MODES.map(m => (
+                {PAYMENT_MODES.filter(m => !hideModes.includes(m.id)).map(m => (
                   <div key={m.id}
                     onClick={() => setForm(p => ({ ...EMPTY_FORM, paymentMode: m.id, type: ['loan','hp','gl'].includes(m.id) ? 'debit' : p.type }))}
                     style={{

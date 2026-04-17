@@ -352,7 +352,7 @@ export default function TellerSession() {
       </div>
 
       {/* ===== POST TRANSACTION TAB ===== */}
-      {tab === 'post' && <PostTransaction />}
+      {tab === 'post' && <PostTransaction hideModes={['transfer', 'gl']} />}
 
       {/* ===== MY PENDING TAB ===== */}
       {tab === 'pending' && (
