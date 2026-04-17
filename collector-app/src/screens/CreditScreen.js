@@ -158,6 +158,49 @@ export default function CreditScreen({ collector }) {
         return;
       }
 
+      // ── Check approval rules ──────────────────────────────────────────
+      const { data: settingsRow } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'approval_rules')
+        .single();
+      const rules = settingsRow?.value || {};
+      const isSavingsCredit = paymentType === 'savings';
+      const ruleKey = isSavingsCredit ? 'credit_threshold' : 'debit_threshold';
+      const rule = rules[ruleKey];
+      const needsApproval = rule?.enabled &&
+        (rule.roles || []).includes('collector') &&
+        amt >= (rule.amount || 0);
+
+      if (needsApproval) {
+        // Submit to pending_approvals instead of posting
+        const narration = paymentType === 'savings'
+          ? `Savings Deposit — ${collector.name}`
+          : paymentType === 'loan'
+            ? `Loan Repayment (via ${collector.name})`
+            : `HP Repayment — ${selectedHP?.item_name} (via ${collector.name})`;
+        await supabase.from('pending_approvals').insert({
+          type: 'collection',
+          payload: { ...opData, narration },
+          submitted_by: collector.id,
+          submitter_name: collector.name,
+          submitted_at: new Date().toISOString(),
+          status: 'pending',
+        });
+        setDone({
+          customer:    selectedCustomer.name,
+          account:     selectedAccount.account_number,
+          amount:      amt,
+          paymentType,
+          newBalance:  null,
+          ref:         'PENDING-APPROVAL',
+          date:        new Date().toLocaleString(),
+          pending:     true,
+        });
+        setSaving(false);
+        return;
+      }
+
       // ── ONLINE: post directly ─────────────────────────────────────────
       const { data: acc, error: accErr } = await supabase
         .from('accounts')
@@ -449,12 +492,14 @@ export default function CreditScreen({ collector }) {
     const pt = PAYMENT_TYPES.find(t => t.key === done.paymentType);
     return (
       <ScrollView contentContainerStyle={styles.successContainer}>
-        <View style={[styles.successIcon, { backgroundColor: done.offline ? '#fef9c3' : '#f0fdf4', borderRadius: 40, padding: 12 }]}>
-          <Text style={{ fontSize: 40 }}>{done.offline ? '📋' : '✅'}</Text>
+        <View style={[styles.successIcon, { backgroundColor: done.pending ? '#eff6ff' : done.offline ? '#fef9c3' : '#f0fdf4', borderRadius: 40, padding: 12 }]}>
+          <Text style={{ fontSize: 40 }}>{done.pending ? '⏳' : done.offline ? '📋' : '✅'}</Text>
         </View>
-        <Text style={styles.successTitle}>{done.offline ? 'Saved Offline' : 'Payment Recorded!'}</Text>
+        <Text style={styles.successTitle}>{done.pending ? 'Awaiting Approval' : done.offline ? 'Saved Offline' : 'Payment Recorded!'}</Text>
         <Text style={styles.successSub}>
-          {done.offline
+          {done.pending
+            ? 'This payment exceeds the approval limit and has been submitted for manager approval. It will post once approved.'
+            : done.offline
             ? 'No internet connection. This payment is queued and will sync automatically when you go online.'
             : 'Collection saved successfully'}
         </Text>
