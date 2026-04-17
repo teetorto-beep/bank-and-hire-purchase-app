@@ -35,7 +35,7 @@ function lastMonthRange() {
 }
 
 export default function Statement() {
-  const { accounts, customers, transactions, loans, hpAgreements } = useApp();
+  const { accounts, customers, transactions, loans, hpAgreements, refresh } = useApp();
   const navigate = useNavigate();
   const statementRef = useRef(null);
 
@@ -77,9 +77,11 @@ export default function Statement() {
     else if (p === 'last_month') { const r = lastMonthRange(); setDateFrom(r.from); setDateTo(r.to); }
   };
 
-  const generate = () => {
+  const generate = async () => {
     if (!selectedAccount) return;
     setGenerating(true);
+    // Always fetch latest data before generating
+    await refresh();
     setTimeout(() => {
       const acctTxns = transactions
         .filter(t => t.accountId === selectedAccount.id)
@@ -520,15 +522,18 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                 const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : principal;
 
                 // Match repayments to this loan using ALL-time txns:
-                // 1. Direct loan_id match
-                // 2. hp_agreement_id matches loan's hpAgreementId
-                // 3. Collector debits (no loan_id stored) matched by narration containing item name
+                // Priority: 1) Direct loan_id, 2) hp_agreement_id, 3) Item name (only for active loans)
                 const itemNameLower = (loan.itemName || '').toLowerCase();
                 const allRepayTxns = (statement.allLoanTxns || statement.loanTransactions || []).filter(t => {
+                  // Direct loan_id match — highest priority
                   if (t.loanId === loan.id || t.loan_id === loan.id) return true;
+                  // HP agreement match
                   if (loan.hpAgreementId && (t.hpAgreementId === loan.hpAgreementId || t.hp_agreement_id === loan.hpAgreementId)) return true;
-                  // Collector transactions often have no loan_id — match by item name in narration
-                  if (itemNameLower && (t.narration || '').toLowerCase().includes(itemNameLower)) return true;
+                  // Collector transactions with no loan_id — match by item name ONLY for active loans
+                  // (to avoid completed loans stealing payments from active ones)
+                  if (loan.status === 'active' && itemNameLower && !t.loanId && !t.loan_id && !t.hpAgreementId && !t.hp_agreement_id) {
+                    if ((t.narration || '').toLowerCase().includes(itemNameLower)) return true;
+                  }
                   return false;
                 });
 
