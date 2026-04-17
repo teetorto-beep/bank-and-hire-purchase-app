@@ -122,6 +122,12 @@ export default function Statement() {
       posterName: t.poster_name || '—',
     }));
 
+    // DEBUG — remove after fix
+    console.log('[Statement] txnRes error:', txnRes.error);
+    console.log('[Statement] total txns from DB:', acctTxns.length);
+    console.log('[Statement] sample dates:', acctTxns.slice(0, 3).map(t => t.createdAt));
+    console.log('[Statement] dateFrom:', dateFrom, 'dateTo:', dateTo);
+
     const acctLoans = (loanRes.data || []).map(l => ({
       ...l,
       id: l.id,
