@@ -122,12 +122,6 @@ export default function Statement() {
       posterName: t.poster_name || '—',
     }));
 
-    // DEBUG — remove after fix
-    console.log('[Statement] txnRes error:', txnRes.error);
-    console.log('[Statement] total txns from DB:', acctTxns.length);
-    console.log('[Statement] sample dates:', acctTxns.slice(0, 3).map(t => t.createdAt));
-    console.log('[Statement] dateFrom:', dateFrom, 'dateTo:', dateTo);
-
     const acctLoans = (loanRes.data || []).map(l => ({
       ...l,
       id: l.id,
@@ -616,16 +610,10 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                   (loan.hpAgreementId && p.agreementId === loan.hpAgreementId)
                 );
 
-                // Period repayments
-                const periodFrom = statement.dateFrom ? new Date(statement.dateFrom + 'T00:00:00') : null;
-                const periodTo   = statement.dateTo   ? new Date(statement.dateTo   + 'T23:59:59') : null;
+                // Period repayments — transactions only (hp_payments are duplicates)
                 const thisLoanTxns = allRepayTxns.filter(t => {
-                  const d = new Date(t.createdAt);
-                  return (!periodFrom || d >= periodFrom) && (!periodTo || d <= periodTo);
-                });
-                const periodHPPayments = linkedHPPayments.filter(p => {
-                  const d = new Date(p.createdAt);
-                  return (!periodFrom || d >= periodFrom) && (!periodTo || d <= periodTo);
+                  const d = t.createdAt ? t.createdAt.slice(0, 10) : '';
+                  return (!statement.dateFrom || d >= statement.dateFrom) && (!statement.dateTo || d <= statement.dateTo);
                 });
 
                 // Use principal - outstanding for accurate total repaid
@@ -665,12 +653,12 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     </div>
 
                     {/* This loan's repayments */}
-                    {(thisLoanTxns.length > 0 || periodHPPayments.length > 0) && (
+                    {thisLoanTxns.length > 0 && (
                       <div style={{ borderTop: '1px solid #fde68a' }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', padding: '8px 14px', background: '#fef9c3', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Repayments in Period ({thisLoanTxns.length + periodHPPayments.length}) — {GHS(thisLoanTxns.reduce((s, t) => s + Number(t.amount || 0), 0) + periodHPPayments.reduce((s, p) => s + Number(p.amount || 0), 0))}</span>
-                          {(allRepayTxns.length + linkedHPPayments.length) > (thisLoanTxns.length + periodHPPayments.length) && (
-                            <span style={{ color: '#64748b', fontWeight: 400 }}>All-time: {GHS(totalRepaid)} ({allRepayTxns.length + linkedHPPayments.length} payments)</span>
+                          <span>Repayments in Period ({thisLoanTxns.length}) — {GHS(thisLoanTxns.reduce((s, t) => s + Number(t.amount || 0), 0))}</span>
+                          {allRepayTxns.length > thisLoanTxns.length && (
+                            <span style={{ color: '#64748b', fontWeight: 400 }}>All-time: {GHS(totalRepaid)} ({allRepayTxns.length} payments)</span>
                           )}
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -695,29 +683,16 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                                 <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(t.amount)}</td>
                               </tr>
                             ))}
-                            {periodHPPayments.map((p, i) => (
-                              <tr key={p.id} style={{ background: (thisLoanTxns.length + i) % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '6px 10px', color: '#64748b' }}>{fmtDate(p.createdAt)}</td>
-                                <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 10 }}>—</td>
-                                <td style={{ padding: '6px 10px' }}>{p.note || 'HP Payment'}</td>
-                                <td style={{ padding: '6px 10px' }}>
-                                  <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 10, fontWeight: 700, background: '#faf5ff', color: '#7c3aed' }}>
-                                    HP Record
-                                  </span>
-                                </td>
-                                <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(p.amount)}</td>
-                              </tr>
-                            ))}
                           </tbody>
                         </table>
                       </div>
                     )}
-                    {thisLoanTxns.length === 0 && periodHPPayments.length === 0 && (
+                    {thisLoanTxns.length === 0 && (
                       <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8', borderTop: '1px solid #fde68a', background: '#fff' }}>
                         No repayments in selected period
-                        {(allRepayTxns.length + linkedHPPayments.length) > 0 && (
+                        {allRepayTxns.length > 0 && (
                           <span style={{ color: '#92400e', marginLeft: 8 }}>
-                            ({allRepayTxns.length + linkedHPPayments.length} payment(s) outside this period — total {GHS(totalRepaid)})
+                            ({allRepayTxns.length} payment(s) outside this period — total {GHS(totalRepaid)})
                           </span>
                         )}
                       </div>
