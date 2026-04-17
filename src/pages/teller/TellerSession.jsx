@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { authDB } from '../../core/db';
 import { Search, Printer, Download, CheckCircle, AlertCircle, TrendingUp, DollarSign, BookOpen, Monitor } from 'lucide-react';
 import { exportCSV } from '../../core/export';
+import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
 
 const GHS = (n) => `GH₵ ${Number(n||0).toLocaleString('en-GH',{minimumFractionDigits:2})}`;
 
@@ -54,7 +55,7 @@ function printReceipt({ ref, account, customer, type, amount, balanceAfter, tell
 }
 
 export default function TellerSession() {
-  const { accounts, customers, transactions, postTransaction, glTransfer } = useApp();
+  const { accounts, customers, transactions, postTransaction, glTransfer, submitForApproval } = useApp();
   const currentUser = authDB.currentUser();
 
   const [tab, setTab] = useState('post');
@@ -68,6 +69,7 @@ export default function TellerSession() {
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState('');
   const [receipt, setReceipt] = useState(null);
+  const [pendingMsg, setPendingMsg] = useState('');
 
   // --- My Report state ---
   const today = new Date().toISOString().slice(0, 10);
@@ -165,28 +167,53 @@ export default function TellerSession() {
     if (!narration.trim()) return setPostError('Enter a narration.');
     setPosting(true);
     setPostError('');
+    setPendingMsg('');
     try {
-      const result = await postTransaction({
-        accountId: selAcc.id,
-        type: txType,
-        amount: Number(amount),
-        narration,
-        channel: 'teller',
-      });
-      const cust = getCustomer(selAcc);
-      setReceipt({
-        ref: result?.reference || result?.id || `TXN-${Date.now()}`,
-        account: selAcc,
-        customer: cust,
-        type: txType,
-        amount: Number(amount),
-        balanceAfter: result?.balanceAfter ?? (txType === 'credit' ? (selAcc.balance || 0) + Number(amount) : (selAcc.balance || 0) - Number(amount)),
-        tellerName: currentUser?.name || 'Teller',
-      });
-      setAmount('');
-      setNarration('');
-      setSearch('');
-      setSelAcc(null);
+      const rules = await loadApprovalRules();
+      const role  = currentUser?.role || 'teller';
+      const amt   = Number(amount);
+      const action = txType === 'credit' ? 'credit' : 'debit';
+      const needsApproval = requiresApproval(action, role, amt, rules);
+
+      if (needsApproval) {
+        // Submit for approval instead of posting directly
+        await submitForApproval('transaction', {
+          accountId: selAcc.id,
+          type: txType,
+          amount: amt,
+          narration,
+          channel: 'teller',
+          accountNumber: selAcc.accountNumber,
+          customerName: getCustomer(selAcc)?.name || '—',
+        });
+        setPendingMsg(`Transaction of ${GHS(amt)} submitted for approval. A manager must approve before it posts.`);
+        setAmount('');
+        setNarration('');
+        setSearch('');
+        setSelAcc(null);
+      } else {
+        const result = await postTransaction({
+          accountId: selAcc.id,
+          type: txType,
+          amount: amt,
+          narration,
+          channel: 'teller',
+        });
+        const cust = getCustomer(selAcc);
+        setReceipt({
+          ref: result?.reference || result?.id || `TXN-${Date.now()}`,
+          account: selAcc,
+          customer: cust,
+          type: txType,
+          amount: amt,
+          balanceAfter: result?.balanceAfter ?? (txType === 'credit' ? (selAcc.balance || 0) + amt : (selAcc.balance || 0) - amt),
+          tellerName: currentUser?.name || 'Teller',
+        });
+        setAmount('');
+        setNarration('');
+        setSearch('');
+        setSelAcc(null);
+      }
     } catch (err) {
       setPostError(err?.message || 'Transaction failed.');
     }
@@ -503,6 +530,12 @@ export default function TellerSession() {
               {postError && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ef4444', fontSize: 13, marginBottom: 10 }}>
                   <AlertCircle size={14} /> {postError}
+                </div>
+              )}
+              {pendingMsg && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef9c3', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#92400e', marginBottom: 10 }}>
+                  <AlertCircle size={14} style={{ marginTop: 1, flexShrink: 0, color: '#d97706' }} />
+                  <span>{pendingMsg}</span>
                 </div>
               )}
 
