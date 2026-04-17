@@ -545,9 +545,13 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     <td style={{ padding: '9px 12px', whiteSpace: 'nowrap', color: '#475569', fontSize: 11 }}>{fmtDate(t.createdAt)}</td>
                     <td style={{ padding: '9px 12px', fontFamily: 'monospace', fontSize: 10, color: '#334155', whiteSpace: 'nowrap' }}>{t.reference}</td>
                     <td style={{ padding: '9px 12px', color: '#0f172a', maxWidth: 260 }}>
-                      {t.narration || '\u2014'}
-                      {t.reversed && <span style={{ fontSize: 9, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>REVERSED</span>}
-                      {t.balanceUnchanged && <span style={{ fontSize: 9, background: '#eff6ff', color: '#1d4ed8', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>COLLECTION</span>}
+                      <div>{t.narration || '\u2014'}
+                        {t.reversed && <span style={{ fontSize: 9, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>REVERSED</span>}
+                        {t.balanceUnchanged && <span style={{ fontSize: 9, background: '#eff6ff', color: '#1d4ed8', padding: '1px 5px', borderRadius: 3, marginLeft: 6, fontWeight: 700 }}>COLLECTION</span>}
+                      </div>
+                      {t.posterName && t.posterName !== '—' && (
+                        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>by {t.posterName}</div>
+                      )}
                     </td>
                     <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: t.balanceUnchanged ? '#94a3b8' : '#dc2626', whiteSpace: 'nowrap' }}>
                       {t.type === 'debit' ? Number(t.amount).toLocaleString('en-GH', { minimumFractionDigits: 2 }) : ''}
