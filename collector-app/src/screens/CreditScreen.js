@@ -182,16 +182,18 @@ export default function CreditScreen({ collector }) {
 
       // 2. Insert transaction record
       await supabase.from('transactions').insert({
-        account_id:    selectedAccount.id,
-        type:          isSavings ? 'credit' : 'debit',  // loan/HP is a debit (money going to pay loan)
-        amount:        amt,
-        narration:     notes || narration,
-        reference:     ref,
-        balance_after: newBalance,
-        channel:       'collection',
-        status:        'completed',
-        poster_name:   collector.name,
-        created_by:    null,
+        account_id:       selectedAccount.id,
+        type:             isSavings ? 'credit' : 'debit',
+        amount:           amt,
+        narration:        notes || narration,
+        reference:        ref,
+        balance_after:    newBalance,
+        channel:          'collection',
+        status:           'completed',
+        poster_name:      collector.name,
+        created_by:       null,
+        loan_id:          paymentType === 'loan' ? selectedLoan?.id || null : null,
+        hp_agreement_id:  paymentType === 'hp'   ? selectedHP?.id   || null : null,
       });
 
       // 3. Update account balance ONLY for savings deposits

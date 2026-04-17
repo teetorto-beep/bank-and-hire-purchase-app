@@ -89,14 +89,18 @@ async function replayOperation(op) {
 
       // 2. Post transaction
       await supabase.from("transactions").insert({
-        account_id: accountId,
-        type: isSavings ? "credit" : "debit",
-        amount: Number(amount),
-        narration: notes || `${paymentType} collection via ${collectorName}`,
-        reference: ref, balance_after: newBalance,
-        channel: "collection", status: "completed",
-        poster_name: collectorName,
-        created_by: null,
+        account_id:      accountId,
+        type:            isSavings ? "credit" : "debit",
+        amount:          Number(amount),
+        narration:       notes || `${paymentType} collection via ${collectorName}`,
+        reference:       ref,
+        balance_after:   newBalance,
+        channel:         "collection",
+        status:          "completed",
+        poster_name:     collectorName,
+        created_by:      null,
+        loan_id:         paymentType === "loan" ? loanId || null : null,
+        hp_agreement_id: paymentType === "hp"   ? hpAgreementId || null : null,
       });
 
       // 3. Update account balance ONLY for savings

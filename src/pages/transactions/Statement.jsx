@@ -83,7 +83,7 @@ export default function Statement() {
     setGenerating(true);
 
     // ── Fetch fresh data directly from DB — avoids stale React state ─────
-    const [txnRes, loanRes, hpRes] = await Promise.all([
+    const [txnRes, loanRes, hpRes, hpPayRes] = await Promise.all([
       supabase
         .from('transactions')
         .select('*')
@@ -97,6 +97,11 @@ export default function Statement() {
         .from('hp_agreements')
         .select('*')
         .eq('customer_id', selectedCustomer?.id),
+      supabase
+        .from('hp_payments')
+        .select('*')
+        .eq('customer_id', selectedCustomer?.id)
+        .order('created_at', { ascending: false }),
     ]);
 
     const acctTxns = (txnRes.data || []).map(t => ({
@@ -145,6 +150,17 @@ export default function Statement() {
       paymentFrequency: a.payment_frequency || 'monthly',
       status: a.status || 'active',
       loanId: a.loan_id || null,
+    }));
+
+    const hpPayments = (hpPayRes.data || []).map(p => ({
+      ...p,
+      id: p.id,
+      agreementId: p.agreement_id,
+      amount: Number(p.amount || 0),
+      remaining: Number(p.remaining || 0),
+      note: p.note || '',
+      collectedBy: p.collected_by || '—',
+      createdAt: p.created_at || '',
     }));
 
     const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
@@ -204,6 +220,7 @@ export default function Statement() {
       allLoanTxns,
       acctLoans,
       acctHP,
+      hpPayments,
       openingBalance, totalCredits, totalDebits, closingBalance,
     });
     setGenerating(false);
@@ -565,29 +582,42 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                 // Match repayments to this loan using ALL-time txns:
                 // Priority: 1) Direct loan_id, 2) hp_agreement_id, 3) Item name (only for active loans)
                 const itemNameLower = (loan.itemName || '').toLowerCase();
-                const allRepayTxns = (statement.allLoanTxns || statement.loanTransactions || []).filter(t => {
-                  // Direct loan_id match — highest priority
+                // Find HP agreements linked to this loan
+                const linkedHPIds = (statement.acctHP || [])
+                  .filter(a => a.loanId === loan.id)
+                  .map(a => a.id);
+
+                const allRepayTxns = (statement.allLoanTxns || []).filter(t => {
                   if (t.loanId === loan.id || t.loan_id === loan.id) return true;
-                  // HP agreement match
+                  if (linkedHPIds.length && (linkedHPIds.includes(t.hpAgreementId) || linkedHPIds.includes(t.hp_agreement_id))) return true;
                   if (loan.hpAgreementId && (t.hpAgreementId === loan.hpAgreementId || t.hp_agreement_id === loan.hpAgreementId)) return true;
-                  // Collector transactions with no loan_id — match by item name ONLY for active loans
-                  // (to avoid completed loans stealing payments from active ones)
+                  // Collector txns with no loan_id/hp_agreement_id — match by item name for active loans only
                   if (loan.status === 'active' && itemNameLower && !t.loanId && !t.loan_id && !t.hpAgreementId && !t.hp_agreement_id) {
                     if ((t.narration || '').toLowerCase().includes(itemNameLower)) return true;
                   }
                   return false;
                 });
 
-                // Period repayments for the repayment table
+                // hp_payments for this loan's HP agreements
+                const linkedHPPayments = (statement.hpPayments || []).filter(p =>
+                  linkedHPIds.includes(p.agreementId) ||
+                  (loan.hpAgreementId && p.agreementId === loan.hpAgreementId)
+                );
+
+                // Period repayments
                 const periodFrom = statement.dateFrom ? new Date(statement.dateFrom + 'T00:00:00') : null;
                 const periodTo   = statement.dateTo   ? new Date(statement.dateTo   + 'T23:59:59') : null;
                 const thisLoanTxns = allRepayTxns.filter(t => {
                   const d = new Date(t.createdAt);
                   return (!periodFrom || d >= periodFrom) && (!periodTo || d <= periodTo);
                 });
+                const periodHPPayments = linkedHPPayments.filter(p => {
+                  const d = new Date(p.createdAt);
+                  return (!periodFrom || d >= periodFrom) && (!periodTo || d <= periodTo);
+                });
 
-                // Total repaid = use loan's own outstanding vs principal, or sum all-time txns
-                const totalRepaid = allRepayTxns.reduce((s, t) => s + Number(t.amount || 0), 0);
+                // Use principal - outstanding for accurate total repaid
+                const totalRepaid = Math.max(0, principal - Number(loan.outstanding || 0));
 
                 return (
                   <div key={loan.id} style={{ marginBottom: lIdx < statement.acctLoans.length - 1 ? 24 : 0, border: '1px solid #fde68a', borderRadius: 10, overflow: 'hidden' }}>
@@ -623,12 +653,12 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                     </div>
 
                     {/* This loan's repayments */}
-                    {thisLoanTxns.length > 0 && (
+                    {(thisLoanTxns.length > 0 || periodHPPayments.length > 0) && (
                       <div style={{ borderTop: '1px solid #fde68a' }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', padding: '8px 14px', background: '#fef9c3', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Repayments in Period ({thisLoanTxns.length}) — {GHS(thisLoanTxns.reduce((s,t)=>s+Number(t.amount||0),0))}</span>
-                          {allRepayTxns.length > thisLoanTxns.length && (
-                            <span style={{ color: '#64748b', fontWeight: 400 }}>All-time: {GHS(totalRepaid)} ({allRepayTxns.length} payments)</span>
+                          <span>Repayments in Period ({thisLoanTxns.length + periodHPPayments.length}) — {GHS(thisLoanTxns.reduce((s, t) => s + Number(t.amount || 0), 0) + periodHPPayments.reduce((s, p) => s + Number(p.amount || 0), 0))}</span>
+                          {(allRepayTxns.length + linkedHPPayments.length) > (thisLoanTxns.length + periodHPPayments.length) && (
+                            <span style={{ color: '#64748b', fontWeight: 400 }}>All-time: {GHS(totalRepaid)} ({allRepayTxns.length + linkedHPPayments.length} payments)</span>
                           )}
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -653,14 +683,31 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
                                 <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(t.amount)}</td>
                               </tr>
                             ))}
+                            {periodHPPayments.map((p, i) => (
+                              <tr key={p.id} style={{ background: (thisLoanTxns.length + i) % 2 === 0 ? '#fff' : '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '6px 10px', color: '#64748b' }}>{fmtDate(p.createdAt)}</td>
+                                <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 10 }}>—</td>
+                                <td style={{ padding: '6px 10px' }}>{p.note || 'HP Payment'}</td>
+                                <td style={{ padding: '6px 10px' }}>
+                                  <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 10, fontWeight: 700, background: '#faf5ff', color: '#7c3aed' }}>
+                                    HP Record
+                                  </span>
+                                </td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>{GHS(p.amount)}</td>
+                              </tr>
+                            ))}
                           </tbody>
                         </table>
                       </div>
                     )}
-                    {thisLoanTxns.length === 0 && (
+                    {thisLoanTxns.length === 0 && periodHPPayments.length === 0 && (
                       <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8', borderTop: '1px solid #fde68a', background: '#fff' }}>
                         No repayments in selected period
-                        {allRepayTxns.length > 0 && <span style={{ color: '#92400e', marginLeft: 8 }}>({allRepayTxns.length} payment(s) outside this period — total {GHS(totalRepaid)})</span>}
+                        {(allRepayTxns.length + linkedHPPayments.length) > 0 && (
+                          <span style={{ color: '#92400e', marginLeft: 8 }}>
+                            ({allRepayTxns.length + linkedHPPayments.length} payment(s) outside this period — total {GHS(totalRepaid)})
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
