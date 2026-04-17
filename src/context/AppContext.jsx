@@ -312,8 +312,13 @@ export function AppProvider({ children }) {
     return { data: t ? normTransaction(t) : null, error };
   };
 
-  const submitForApproval = async (data) => {
-    const { data: p, error } = await pendingDB.submit(data, user?.id, user?.name);
+  const submitForApproval = async (data, extraPayload) => {
+    // Support both call signatures:
+    //   submitForApproval(payload)               — from PostTransaction
+    //   submitForApproval('transaction', payload) — from TellerSession
+    const payload = extraPayload !== undefined ? extraPayload : data;
+    const { data: p, error } = await pendingDB.submit(payload, user?.id, user?.name);
+    if (error) console.error('[submitForApproval] error:', error);
     if (p) setPendingTxns(prev => [normPendingTxn(p), ...prev]);
     return { data: p ? normPendingTxn(p) : null, error };
   };
@@ -426,7 +431,7 @@ export function AppProvider({ children }) {
       loading, lastRefresh, customers, accounts, transactions, loans, collectors, collections,
       products, hpItems, hpAgreements, hpPayments, pendingTxns, deductionRules, auditLog,
       pendingApprovals, users,
-      stats, refresh,
+      stats, refresh, silentRefresh,
       addCustomer, updateCustomer,
       openAccount, updateAccount,
       postTransaction, reverseTransaction,

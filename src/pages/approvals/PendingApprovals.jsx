@@ -61,7 +61,7 @@ function getDetails(item) {
 }
 
 export default function PendingApprovals() {
-  const { pendingApprovals, pendingTxns, accounts, customers, approveApproval, rejectApproval, approvePendingTxn, rejectPendingTxn, refresh } = useApp();
+  const { pendingApprovals, pendingTxns, accounts, customers, approveApproval, rejectApproval, approvePendingTxn, rejectPendingTxn, refresh, silentRefresh } = useApp();
   const user = authDB.currentUser();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
@@ -71,6 +71,13 @@ export default function PendingApprovals() {
   const [error,       setError]       = useState('');
   const [filter,      setFilter]      = useState('pending');
   const [typeFilter,  setTypeFilter]  = useState('all');
+  const [refreshing,  setRefreshing]  = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await silentRefresh();
+    setRefreshing(false);
+  };
 
   // Merge both approval sources into one unified list
   const allItems = useMemo(() => {
@@ -159,7 +166,9 @@ export default function PendingApprovals() {
           <div className="page-desc">All pending actions requiring authorisation</div>
         </div>
         <div className="page-header-right">
-          <button className="btn btn-ghost btn-sm" onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+          <button className="btn btn-ghost btn-sm" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw size={14} style={refreshing ? { animation: 'spin 1s linear infinite' } : {}} /> {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
         </div>
       </div>
 
