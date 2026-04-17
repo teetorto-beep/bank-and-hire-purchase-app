@@ -202,8 +202,9 @@ export default function Statement() {
       else closingBalance += t.amount;
     }
 
-    const totalCredits = periodTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-    const totalDebits  = periodTxns.filter(t => t.type === 'debit' && !isCollectorCashPayment(t)).reduce((s, t) => s + t.amount, 0);
+    const totalCredits          = periodTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+    const totalDebits           = periodTxns.filter(t => t.type === 'debit' && !isCollectorCashPayment(t)).reduce((s, t) => s + t.amount, 0);
+    const totalCollectionDebits = periodTxns.filter(t => isCollectorCashPayment(t)).reduce((s, t) => s + t.amount, 0);
     const openingBalance = closingBalance - totalCredits + totalDebits;
 
     let runningBal = openingBalance;
@@ -227,7 +228,7 @@ export default function Statement() {
       acctLoans,
       acctHP,
       hpPayments,
-      openingBalance, totalCredits, totalDebits, closingBalance,
+      openingBalance, totalCredits, totalDebits, totalCollectionDebits, closingBalance,
     });
     setGenerating(false);
   };
@@ -512,14 +513,15 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
           </div>
 
           {/* Summary boxes */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', borderBottom: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', borderBottom: '1px solid #e2e8f0' }}>
             {[
               { label: 'Opening Balance', value: statement.openingBalance, color: '#1a56db' },
               { label: 'Total Credits',   value: statement.totalCredits,   color: '#16a34a' },
               { label: 'Total Debits',    value: statement.totalDebits,    color: '#dc2626' },
+              { label: 'Collections',     value: statement.totalCollectionDebits, color: '#7c3aed' },
               { label: 'Closing Balance', value: statement.closingBalance, color: '#0f172a' },
             ].map((s, i) => (
-              <div key={s.label} style={{ padding: '16px 20px', borderRight: i < 3 ? '1px solid #e2e8f0' : 'none', background: '#fff' }}>
+              <div key={s.label} style={{ padding: '16px 20px', borderRight: i < 4 ? '1px solid #e2e8f0' : 'none', background: '#fff' }}>
                 <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{s.label}</div>
                 <div style={{ fontSize: 18, fontWeight: 800, color: s.color }}>{GHS(s.value)}</div>
               </div>
@@ -568,7 +570,9 @@ ${hpRows ? `<div class="section-title">🛍️ Hire Purchase Summary</div>
               <tfoot>
                 <tr style={{ background: '#1e293b' }}>
                   <td colSpan={4} style={{ padding: '10px 12px', color: '#fff', fontWeight: 700, fontSize: 11 }}>TOTALS</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#fca5a5', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{Number(statement.totalDebits).toLocaleString('en-GH', { minimumFractionDigits: 2 })}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#fca5a5', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {Number(statement.totalDebits + (statement.totalCollectionDebits || 0)).toLocaleString('en-GH', { minimumFractionDigits: 2 })}
+                  </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', color: '#86efac', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{Number(statement.totalCredits).toLocaleString('en-GH', { minimumFractionDigits: 2 })}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', color: '#fff', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{Number(statement.closingBalance).toLocaleString('en-GH', { minimumFractionDigits: 2 })}</td>
                 </tr>
