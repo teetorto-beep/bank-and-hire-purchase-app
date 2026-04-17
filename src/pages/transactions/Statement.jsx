@@ -83,7 +83,7 @@ export default function Statement() {
     setGenerating(true);
 
     // ── Fetch fresh data directly from DB — avoids stale React state ─────
-    const [txnRes, loanRes, hpRes, hpPayRes] = await Promise.all([
+    const [txnRes, loanRes, hpRes] = await Promise.all([
       supabase
         .from('transactions')
         .select('*')
@@ -97,14 +97,9 @@ export default function Statement() {
         .from('hp_agreements')
         .select('*')
         .eq('customer_id', selectedCustomer?.id),
-      supabase
-        .from('hp_payments')
-        .select('*')
-        .in('agreement_id', [])  // placeholder — fetched below after hp agreements load
-        .order('created_at', { ascending: false }),
     ]);
 
-    // Fetch hp_payments using agreement IDs from the hp agreements result
+    // Fetch hp_payments using agreement IDs (only if agreements exist)
     const hpAgreementIds = (hpRes.data || []).map(a => a.id);
     const hpPayRes2 = hpAgreementIds.length > 0
       ? await supabase.from('hp_payments').select('*').in('agreement_id', hpAgreementIds).order('created_at', { ascending: false })
