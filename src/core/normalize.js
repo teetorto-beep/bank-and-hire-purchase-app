@@ -90,6 +90,7 @@ export const normLoan = (l) => !l ? null : {
   type: l.type || '',
   amount: Number(l.amount ?? 0),
   outstanding: Number(l.outstanding ?? 0),
+  totalRepayment: Number(l.total_repayment ?? l.totalRepayment ?? 0) || null,
   interestRate: Number(l.interest_rate ?? l.interestRate ?? 0),
   tenure: Number(l.tenure ?? 0),
   monthlyPayment: Number(l.monthly_payment ?? l.monthlyPayment ?? 0),

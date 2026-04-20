@@ -791,18 +791,21 @@ export const loansDB = {
     const tenure = Number(payload.tenure ?? 0);
     const monthly = Number(payload.monthlyPayment ?? payload.monthly_payment ?? 0);
 
-    // Total repayable = principal + total interest (monthly * tenure)
-    // This ensures outstanding tracks the full amount owed including interest
-    const totalRepayable = monthly > 0 && tenure > 0
-      ? Math.round(monthly * tenure * 100) / 100
-      : principal;
+    // Use pre-calculated total if provided (from LoanApplication form)
+    // otherwise fall back to monthly * tenure
+    const totalRepayable = payload.totalRepayment
+      ? Math.round(Number(payload.totalRepayment) * 100) / 100
+      : monthly > 0 && tenure > 0
+        ? Math.round(monthly * tenure * 100) / 100
+        : principal;
 
     const row = clean({
       customer_id: payload.customerId || payload.customer_id,
       account_id: payload.accountId || payload.account_id,
       type: payload.type,
       amount: principal,
-      outstanding: totalRepayable,  // full repayable amount (principal + interest)
+      outstanding: totalRepayable,
+      total_repayment: totalRepayable,  // stored explicitly
       interest_rate: rate,
       tenure: payload.tenure,
       monthly_payment: monthly,
@@ -1067,7 +1070,8 @@ export const hpAgreementsDB = {
       account_id: payload.accountId || payload.account_id,
       type: 'hire_purchase',
       amount: loanPrincipal,
-      outstanding: totalRepayment,  // full repayable (principal + interest), not just principal
+      outstanding: totalRepayment,  // full repayable (principal + interest)
+      total_repayment: totalRepayment,  // stored explicitly for display
       interest_rate: rate,
       tenure,
       monthly_payment: monthlyPayment,

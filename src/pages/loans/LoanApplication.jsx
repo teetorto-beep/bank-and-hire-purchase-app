@@ -187,6 +187,7 @@ export default function LoanApplication() {
           interestRate:   rate,
           tenure,
           monthlyPayment: monthly,
+          totalRepayment: totalRepay,
           purpose:        form.purpose,
           calcMethod:     form.calcMethod,
         };

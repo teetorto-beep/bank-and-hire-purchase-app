@@ -75,7 +75,10 @@ export default function Loans() {
       const principal = Number(loan.amount || 0);
       const monthly = Number(loan.monthlyPayment || 0);
       const tenure = Number(loan.tenure || 0);
-      const totalRepay = monthly > 0 && tenure > 0 ? monthly * tenure : principal;
+      // Use stored total_repayment if available (set correctly at creation time)
+      // Fall back to monthly * tenure only if not stored
+      const totalRepay = Number(loan.totalRepayment || loan.total_repayment || 0) ||
+        (monthly > 0 && tenure > 0 ? Math.round(monthly * tenure * 100) / 100 : principal);
       const totalInterest = Math.max(0, totalRepay - principal);
       // outstanding now tracks total remaining (principal + interest)
       // paid = totalRepay - outstanding
