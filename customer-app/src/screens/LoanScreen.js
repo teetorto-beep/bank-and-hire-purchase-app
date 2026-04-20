@@ -170,8 +170,12 @@ function LoanDetail({ loan, onClose }) {
   const headerBg = completed ? C.greenDk : overdue ? C.redDk : C.brand;
 
   useEffect(() => {
-    supabase.from('collections').select('id,amount,created_at,notes,collector_name')
-      .eq('loan_id', loan.id).order('created_at', { ascending: false }).limit(50)
+    // Try loan_payments first, fall back to collections filtered by loan reference
+    supabase.from('collections')
+      .select('id,amount,created_at,notes,collector_name')
+      .eq('customer_id', loan.customer_id)
+      .eq('payment_type', 'loan')
+      .order('created_at', { ascending: false }).limit(50)
       .then(({ data }) => { setPayments(data || []); setLoadingPay(false); });
   }, [loan.id]);
 

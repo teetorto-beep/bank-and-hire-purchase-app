@@ -19,11 +19,11 @@ import ProfileScreen       from './src/screens/ProfileScreen';
 
 // Tab config — 5 tabs, center one is highlighted
 const TABS = [
-  { key: 'home',    label: 'Home',     icon: '⌂' },
-  { key: 'accounts',label: 'Accounts', icon: '◈' },
-  { key: 'loans',   label: 'Loans',    icon: '◉', center: true },
-  { key: 'txns',    label: 'History',  icon: '≡' },
-  { key: 'profile', label: 'Profile',  icon: '◯' },
+  { key: 'home',    label: 'Home',     icon: '\u2302' },
+  { key: 'accounts',label: 'Accounts', icon: '\u25C8' },
+  { key: 'loans',   label: 'Loans',    icon: '\u25CE', center: true },
+  { key: 'txns',    label: 'History',  icon: '\u2261' },
+  { key: 'profile', label: 'Profile',  icon: '\u25A1' },
 ];
 
 function MainApp({ customer, onLogout }) {
@@ -60,7 +60,6 @@ function MainApp({ customer, onLogout }) {
     ch.subscribe();
     return () => { clearInterval(interval); supabase.removeChannel(ch); };
   }, [customer.id, accounts.map(a => a.id).join(',')]);
-
   useEffect(() => {
     supabase.from('notifications').select('id', { count: 'exact', head: true })
       .eq('user_id', customer.id).eq('read', false)
@@ -110,7 +109,7 @@ function MainApp({ customer, onLogout }) {
             <TouchableOpacity key={t.key} style={A.tabItem} onPress={() => setTab(t.key)} activeOpacity={0.7}>
               <View style={[A.tabIconWrap, active && A.tabIconWrapActive]}>
                 <Text style={[A.tabIcon, active && A.tabIconActive]}>{t.icon}</Text>
-                {t.key === 'profile' && unread > 0 && <View style={A.tabBadge}><Text style={A.tabBadgeTxt}>{unread > 9 ? '9+' : unread}</Text></View>}
+                {t.key === 'home' && unread > 0 && <View style={A.tabBadge}><Text style={A.tabBadgeTxt}>{unread > 9 ? '9+' : unread}</Text></View>}
               </View>
               <Text style={[A.tabLabel, active && A.tabLabelActive]}>{t.label}</Text>
             </TouchableOpacity>

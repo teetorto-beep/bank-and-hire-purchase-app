@@ -1,625 +1,561 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, Alert,
-} from 'react-native';
-import { supabase } from '../supabase';
-import { enqueue, getIsOnline } from '../offline';
-import { C, GHS } from '../theme';
+  View, Text, StyleSheet, ScrollView, TextInput,
+  TouchableOpacity, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform,
+} from "react-native";
+import { supabase } from "../supabase";
+import { C, GHS } from "../theme";
 
-const PAYMENT_TYPES = [
-  { key: 'savings', label: 'Savings Deposit', icon: '💰', color: C.green,  bg: C.greenLt,  border: C.greenBg  },
-  { key: 'loan',    label: 'Loan Repayment',  icon: '📋', color: C.blue,   bg: C.blueLt,   border: C.blueBg   },
-  { key: 'hp',      label: 'HP Repayment',    icon: '🛍️', color: C.purple, bg: '#f5f3ff',  border: '#ddd6fe'  },
+const TYPES = [
+  { key:"savings", label:"Savings",  sub:"Deposit to savings account",       color:C.green,  bg:C.greenBg  },
+  { key:"loan",    label:"Loan",     sub:"Repayment against loan balance",    color:C.blue,   bg:C.blueBg   },
+  { key:"hp",      label:"HP",       sub:"Hire purchase instalment payment",  color:C.purple, bg:C.purpleBg },
 ];
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-async function checkApprovalNeeded(paymentType, amt) {
-  try {
-    const { data } = await supabase
-      .from('system_settings').select('value').eq('key', 'approval_rules').single();
-    const rules = data?.value || {};
-    const key   = paymentType === 'savings' ? 'credit_threshold' : 'debit_threshold';
-    const rule  = rules[key];
-    return !!(rule?.enabled && (rule.roles || []).includes('collector') && amt >= (rule.amount || 0));
-  } catch (_) { return false; }
-}
+export default function CreditScreen({ collector }) {
+  const [step,       setStep]       = useState(1);
+  const [query,      setQuery]      = useState("");
+  const [searching,  setSearching]  = useState(false);
+  const [results,    setResults]    = useState([]);
+  const [account,    setAccount]    = useState(null);
+  const [collType,   setCollType]   = useState("savings");
+  const [amount,     setAmount]     = useState("");
+  const [notes,      setNotes]      = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-async function postDirectly(opData, collector) {
-  const { accountId, customerId, customerName, amount, paymentType,
-          loanId, hpAgreementId, notes, collectorName } = opData;
-
-  const { data: acc } = await supabase.from('accounts')
-    .select('balance, customer_id').eq('id', accountId).single();
-  if (!acc) throw new Error('Account not found');
-
-  const isSavings  = paymentType === 'savings';
-  const newBalance = isSavings ? Number(acc.balance) + amount : Number(acc.balance);
-  const ref        = `TXN${Date.now()}${Math.random().toString(36).slice(2,5).toUpperCase()}`;
-  const narration  = notes || (isSavings
-    ? `Savings Deposit — ${collectorName}`
-    : paymentType === 'loan'
-      ? `Loan Repayment (via ${collectorName})`
-      : `HP Repayment (via ${collectorName})`);
-
-  await supabase.from('transactions').insert({
-    account_id: accountId, type: isSavings ? 'credit' : 'debit',
-    amount, narration, reference: ref, balance_after: newBalance,
-    channel: 'collection', status: 'completed', poster_name: collectorName,
-    created_by: null,
-    loan_id:          paymentType === 'loan' ? loanId : null,
-    hp_agreement_id:  paymentType === 'hp'   ? hpAgreementId : null,
-  });
-
-  if (isSavings) {
-    await supabase.from('accounts')
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq('id', accountId);
-  }
-
-  if (paymentType === 'loan' && loanId) {
-    const { data: loan } = await supabase.from('loans')
-      .select('outstanding, status').eq('id', loanId).single();
-    if (loan) {
-      const newOut = Math.max(0, Number(loan.outstanding) - amount);
-      await supabase.from('loans').update({
-        outstanding: newOut, status: newOut <= 0 ? 'completed' : loan.status,
-        last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString(),
-      }).eq('id', loanId);
-    }
-  }
-
-  if (paymentType === 'hp' && hpAgreementId) {
-    const { data: agr } = await supabase.from('hp_agreements')
-      .select('total_paid, total_price, loan_id').eq('id', hpAgreementId).single();
-    if (agr) {
-      const newPaid = Number(agr.total_paid) + amount;
-      const remaining = Math.max(0, Number(agr.total_price) - newPaid);
-      await supabase.from('hp_agreements').update({
-        total_paid: newPaid, remaining,
-        status: remaining <= 0 ? 'completed' : 'active',
-        last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString(),
-      }).eq('id', hpAgreementId);
-      await supabase.from('hp_payments').insert({
-        agreement_id: hpAgreementId, amount: remaining,
-        note: notes || 'Collection payment', collected_by: collectorName,
-      });
-      const linkedLoanId = agr.loan_id;
-      if (linkedLoanId) {
-        const { data: l } = await supabase.from('loans')
-          .select('outstanding, status').eq('id', linkedLoanId).single();
-        if (l) {
-          const newOut = Math.max(0, Number(l.outstanding) - amount);
-          await supabase.from('loans').update({
-            outstanding: newOut, status: newOut <= 0 ? 'completed' : l.status,
-            last_payment_date: new Date().toISOString(), updated_at: new Date().toISOString(),
-          }).eq('id', linkedLoanId);
-        }
-      }
-    }
-  }
-
-  const { data: col } = await supabase.from('collections').insert({
-    collector_id: collector.id, collector_name: collectorName,
-    customer_id: customerId, customer_name: customerName,
-    account_id: accountId, amount, notes: notes || null,
-    payment_type: paymentType,
-    loan_id:          paymentType === 'loan' ? loanId : null,
-    hp_agreement_id:  paymentType === 'hp'   ? hpAgreementId : null,
-    status: 'completed',
-  }).select().single();
-
-  await supabase.from('collectors').update({
-    total_collected: Number(collector.total_collected || 0) + amount,
-    updated_at: new Date().toISOString(),
-  }).eq('id', collector.id);
-
-  return { ref, newBalance: isSavings ? newBalance : null };
-}
-
-export default function CreditScreen({ collector, onDone }) {
-  const [step,             setStep]             = useState(1);
-  const [custSearch,       setCustSearch]       = useState('');
-  const [customers,        setCustomers]        = useState([]);
-  const [loadingCust,      setLoadingCust]      = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [paymentType,      setPaymentType]      = useState('savings');
-  const [accounts,         setAccounts]         = useState([]);
-  const [selectedAccount,  setSelectedAccount]  = useState(null);
-  const [loans,            setLoans]            = useState([]);
-  const [selectedLoan,     setSelectedLoan]     = useState(null);
-  const [hpAgreements,     setHpAgreements]     = useState([]);
-  const [selectedHP,       setSelectedHP]       = useState(null);
-  const [amount,           setAmount]           = useState('');
-  const [notes,            setNotes]            = useState('');
-  const [saving,           setSaving]           = useState(false);
-  const [done,             setDone]             = useState(null);
-
-  const searchCustomers = useCallback(async (q) => {
-    if (!q || q.length < 2) { setCustomers([]); return; }
-    setLoadingCust(true);
+  // ── Search ────────────────────────────────────────────────────────────────
+  const searchAccount = async () => {
+    const q = query.trim();
+    if (!q) { Alert.alert("Required", "Enter an account number or customer name"); return; }
+    setSearching(true); setResults([]);
     try {
-      const { data: accData } = await supabase.from('accounts')
-        .select('customer_id').ilike('account_number', `%${q}%`).eq('status', 'active').limit(10);
-      const accIds = (accData || []).map(a => a.customer_id).filter(Boolean);
-      const { data: byName } = await supabase.from('customers')
-        .select('id, name, phone').or(`name.ilike.%${q}%,phone.ilike.%${q}%`).limit(20);
-      const nameIds = new Set((byName || []).map(c => c.id));
-      let extra = [];
-      const newIds = accIds.filter(id => !nameIds.has(id));
-      if (newIds.length) {
-        const { data: byAcc } = await supabase.from('customers')
-          .select('id, name, phone').in('id', newIds);
-        extra = byAcc || [];
+      const { data: byAcct } = await supabase
+        .from("accounts").select("id,account_number,balance,type,status,customer_id")
+        .ilike("account_number", "%" + q + "%").eq("status", "active").limit(10);
+
+      const { data: byName } = await supabase
+        .from("customers").select("id,name,phone").ilike("name", "%" + q + "%").limit(10);
+
+      let found = [];
+      if (byAcct?.length) {
+        const ids = [...new Set(byAcct.map(a => a.customer_id).filter(Boolean))];
+        let cm = {};
+        if (ids.length) {
+          const { data: custs } = await supabase.from("customers").select("id,name,phone").in("id", ids);
+          (custs || []).forEach(c => { cm[c.id] = c; });
+        }
+        found = byAcct.map(a => ({ ...a, customer: cm[a.customer_id] || null }));
       }
-      setCustomers([...(byName || []), ...extra]);
-    } catch (_) {}
-    setLoadingCust(false);
-  }, []);
+      if (!found.length && byName?.length) {
+        const ids = byName.map(c => c.id);
+        const { data: accts } = await supabase
+          .from("accounts").select("id,account_number,balance,type,status,customer_id")
+          .in("customer_id", ids).eq("status", "active").limit(10);
+        const cm = {};
+        byName.forEach(c => { cm[c.id] = c; });
+        found = (accts || []).map(a => ({ ...a, customer: cm[a.customer_id] || null }));
+      }
 
-  useEffect(() => {
-    const t = setTimeout(() => searchCustomers(custSearch), 400);
-    return () => clearTimeout(t);
-  }, [custSearch, searchCustomers]);
-
-  const selectCustomer = async (c) => {
-    setSelectedCustomer(c); setSelectedAccount(null);
-    setSelectedLoan(null); setSelectedHP(null);
-    const { data } = await supabase.from('accounts')
-      .select('id, account_number, type, balance').eq('customer_id', c.id).eq('status', 'active');
-    setAccounts(data || []);
-    setStep(2);
-  };
-
-  const selectType = async (type) => {
-    setPaymentType(type); setSelectedLoan(null); setSelectedHP(null);
-    if (type === 'loan') {
-      const { data } = await supabase.from('loans')
-        .select('id, type, outstanding, monthly_payment, status')
-        .eq('customer_id', selectedCustomer.id).in('status', ['active', 'overdue']);
-      setLoans(data || []);
-    } else if (type === 'hp') {
-      const { data } = await supabase.from('hp_agreements')
-        .select('id, item_name, remaining, suggested_payment, payment_frequency, loan_id, total_paid, total_price')
-        .eq('customer_id', selectedCustomer.id).eq('status', 'active');
-      setHpAgreements(data || []);
-    }
-    setStep(3);
+      if (!found.length) {
+        Alert.alert("Not Found", "No active account found.");
+      } else if (found.length === 1) {
+        setAccount(found[0]); setStep(2);
+      } else {
+        setResults(found);
+      }
+    } catch (e) { Alert.alert("Error", e.message || "Search failed"); }
+    setSearching(false);
   };
 
   const reset = () => {
-    setStep(1); setCustSearch(''); setCustomers([]);
-    setSelectedCustomer(null); setSelectedAccount(null);
-    setSelectedLoan(null); setSelectedHP(null);
-    setPaymentType('savings'); setAmount(''); setNotes(''); setDone(null);
+    setStep(1); setQuery(""); setAccount(null); setResults([]);
+    setCollType("savings"); setAmount(""); setNotes("");
   };
 
-  const handleSubmit = async () => {
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) { Alert.alert('Error', 'Enter a valid amount'); return; }
-    if (!selectedAccount)  { Alert.alert('Error', 'Select an account'); return; }
-    if (paymentType === 'loan' && !selectedLoan) { Alert.alert('Error', 'Select a loan'); return; }
-    if (paymentType === 'hp'   && !selectedHP)   { Alert.alert('Error', 'Select an HP agreement'); return; }
+  // ── Post ──────────────────────────────────────────────────────────────────
+  const postCollection = async () => {
+    const amt = parseFloat(amount) || 0;
+    if (amt <= 0) { Alert.alert("Required", "Enter a valid amount"); return; }
 
-    setSaving(true);
+    setSubmitting(true);
     try {
-      const opData = {
-        collectorId:   collector.id,
-        collectorName: collector.name,
-        customerId:    selectedCustomer.id,
-        customerName:  selectedCustomer.name,
-        accountId:     selectedAccount.id,
-        amount:        amt,
-        notes:         notes || null,
-        paymentType,
-        loanId:        paymentType === 'loan' ? selectedLoan?.id : null,
-        hpAgreementId: paymentType === 'hp'   ? selectedHP?.id   : null,
-      };
+      const custId   = account.customer?.id || account.customer_id || null;
+      const custName = account.customer?.name || null;
+      const ref      = "COL" + Date.now() + Math.random().toString(36).slice(2, 8).toUpperCase();
+      let loanId = null, hpId = null, msg = "";
 
-      // ── OFFLINE ──────────────────────────────────────────────────────────
-      if (!getIsOnline()) {
-        await enqueue({ type: 'collection', data: opData });
-        setDone({ status: 'offline', amount: amt, paymentType,
-          customer: selectedCustomer.name, account: selectedAccount.account_number,
-          ref: 'QUEUED-' + Date.now() });
-        setSaving(false);
-        return;
-      }
+      // ── SAVINGS: credit account balance ──────────────────────────────────
+      if (collType === "savings") {
+        const { data: fresh, error: fe } = await supabase
+          .from("accounts").select("balance").eq("id", account.id).single();
+        if (fe || !fresh) throw new Error("Could not fetch balance: " + (fe?.message || ""));
 
-      // ── Check approval threshold ──────────────────────────────────────────
-      const needsApproval = await checkApprovalNeeded(paymentType, amt);
+        const newBal = Number(fresh.balance) + amt;
 
-      if (needsApproval) {
-        // Submit to pending_transactions (same table as teller) so it shows in web Approvals
-        const narration = notes || (paymentType === 'savings'
-          ? `Savings Deposit — ${collector.name}`
-          : paymentType === 'loan'
-            ? `Loan Repayment (via ${collector.name})`
-            : `HP Repayment (via ${collector.name})`);
+        const { error: be } = await supabase.from("accounts")
+          .update({ balance: newBal, updated_at: new Date().toISOString() }).eq("id", account.id);
+        if (be) throw new Error("Balance update failed: " + be.message);
 
-        const { error } = await supabase.from('pending_transactions').insert({
-          account_id:     selectedAccount.id,
-          type:           paymentType === 'savings' ? 'credit' : 'debit',
-          amount:         amt,
-          narration,
-          channel:        'collection',
-          submitted_by:   collector.id,
-          submitter_name: collector.name,
-          status:         'pending',
-          submitted_at:   new Date().toISOString(),
+        // type = "credit" — money coming IN to savings account ✓
+        const { error: te } = await supabase.from("transactions").insert({
+          account_id:    account.id,
+          type:          "credit",
+          amount:        amt,
+          narration:     (notes.trim() || "Savings deposit") + " — via collector " + collector.name,
+          reference:     ref,
+          balance_after: newBal,
+          channel:       "collection",
+          poster_name:   collector.name,
+          status:        "completed",
+          created_at:    new Date().toISOString(),
         });
-        if (error) throw new Error(error.message);
+        if (te) throw new Error("Transaction failed: " + te.message);
 
-        setDone({ status: 'pending', amount: amt, paymentType,
-          customer: selectedCustomer.name, account: selectedAccount.account_number,
-          ref: 'PENDING-APPROVAL' });
-        setSaving(false);
-        return;
+        msg = (custName || account.account_number) + "\nDeposited: " + GHS(amt) + "\nNew balance: " + GHS(newBal);
       }
 
-      // ── Post directly ─────────────────────────────────────────────────────
-      const { ref, newBalance } = await postDirectly(opData, collector);
-      setDone({ status: 'posted', amount: amt, paymentType,
-        customer: selectedCustomer.name, account: selectedAccount.account_number,
-        newBalance, ref });
+      // ── LOAN REPAYMENT: debit entry, reduce loans.outstanding ─────────────
+      else if (collType === "loan") {
+        let loan = null;
+        const { data: la } = await supabase.from("loans")
+          .select("id,outstanding,status,account_id")
+          .eq("account_id", account.id).in("status", ["active","overdue"])
+          .order("created_at", { ascending:false }).limit(1).single();
+        loan = la || null;
 
+        if (!loan && custId) {
+          const { data: lc } = await supabase.from("loans")
+            .select("id,outstanding,status,account_id")
+            .eq("customer_id", custId).in("status", ["active","overdue"])
+            .order("created_at", { ascending:false }).limit(1).single();
+          loan = lc || null;
+        }
+
+        if (!loan) {
+          Alert.alert("No Active Loan", "No active or overdue loan found for this customer.");
+          setSubmitting(false); return;
+        }
+
+        loanId = loan.id;
+        const newOut    = Math.max(0, Number(loan.outstanding) - amt);
+        const newStatus = newOut <= 0 ? "completed" : loan.status;
+
+        const { error: le } = await supabase.from("loans").update({
+          outstanding:       newOut,
+          status:            newStatus,
+          last_payment_date: new Date().toISOString(),
+          updated_at:        new Date().toISOString(),
+        }).eq("id", loan.id);
+        if (le) throw new Error("Loan update failed: " + le.message);
+
+        // Fetch current account balance — does NOT change for loan repayment
+        const { data: ab } = await supabase.from("accounts")
+          .select("balance").eq("id", account.id).single();
+        const currentBal = Number(ab?.balance || 0);
+
+        // type = "debit" — loan repayment is a DEBIT entry (reduces loan receivable) ✓
+        // balance_after = unchanged savings balance (loan payment doesn't touch savings)
+        const { error: te } = await supabase.from("transactions").insert({
+          account_id:    account.id,
+          type:          "debit",
+          amount:        amt,
+          narration:     (notes.trim() || "Loan repayment") + " — via collector " + collector.name,
+          reference:     ref,
+          balance_after: currentBal,
+          channel:       "collection",
+          poster_name:   collector.name,
+          loan_id:       loan.id,
+          status:        "completed",
+          created_at:    new Date().toISOString(),
+        });
+        if (te) throw new Error("Transaction failed: " + te.message);
+
+        msg = (custName || account.account_number) + "\nLoan repayment: " + GHS(amt) +
+          "\nOutstanding: " + GHS(newOut) +
+          (newStatus === "completed" ? "\n\u2705 Loan fully paid!" : "");
+      }
+
+      // ── HP REPAYMENT: debit entry, reduce hp_agreements + linked loan ─────
+      else if (collType === "hp") {
+        if (!custId) throw new Error("Customer not found for this account");
+
+        const { data: hp, error: hfe } = await supabase.from("hp_agreements")
+          .select("id,total_paid,total_price,remaining,loan_id")
+          .eq("customer_id", custId).eq("status", "active")
+          .order("created_at", { ascending:false }).limit(1).single();
+
+        if (hfe || !hp) {
+          Alert.alert("No Active HP", "No active hire-purchase agreement found for this customer.");
+          setSubmitting(false); return;
+        }
+
+        hpId = hp.id;
+        const newPaid      = Number(hp.total_paid || 0) + amt;
+        const newRemaining = Math.max(0, Number(hp.total_price || 0) - newPaid);
+        const newHPStatus  = newRemaining <= 0 ? "completed" : "active";
+
+        const { error: he } = await supabase.from("hp_agreements").update({
+          total_paid:        newPaid,
+          remaining:         newRemaining,
+          status:            newHPStatus,
+          last_payment_date: new Date().toISOString(),
+          updated_at:        new Date().toISOString(),
+        }).eq("id", hp.id);
+        if (he) throw new Error("HP update failed: " + he.message);
+
+        const { error: hpe } = await supabase.from("hp_payments").insert({
+          agreement_id: hp.id,
+          amount:       amt,
+          remaining:    newRemaining,
+          note:         notes.trim() || "HP collection via " + collector.name,
+          collected_by: collector.name,
+          created_at:   new Date().toISOString(),
+        });
+        if (hpe) throw new Error("HP payment record failed: " + hpe.message);
+
+        // Reduce linked loan outstanding
+        let linkedLoanId = hp.loan_id;
+        if (!linkedLoanId) {
+          const { data: fl } = await supabase.from("loans").select("id")
+            .eq("hp_agreement_id", hp.id).in("status", ["active","overdue"]).limit(1).single();
+          linkedLoanId = fl?.id || null;
+        }
+        if (linkedLoanId) {
+          loanId = linkedLoanId;
+          const { data: hl } = await supabase.from("loans")
+            .select("outstanding,status").eq("id", linkedLoanId).single();
+          if (hl) {
+            const newOut = Math.max(0, Number(hl.outstanding) - amt);
+            await supabase.from("loans").update({
+              outstanding:       newOut,
+              status:            newOut <= 0 ? "completed" : hl.status,
+              last_payment_date: new Date().toISOString(),
+              updated_at:        new Date().toISOString(),
+            }).eq("id", linkedLoanId);
+          }
+        }
+
+        // Fetch current account balance — does NOT change for HP payment
+        const { data: ab } = await supabase.from("accounts")
+          .select("balance").eq("id", account.id).single();
+        const currentBal = Number(ab?.balance || 0);
+
+        // type = "debit" — HP payment is a DEBIT entry ✓
+        // balance_after = unchanged savings balance
+        const { error: te } = await supabase.from("transactions").insert({
+          account_id:      account.id,
+          type:            "debit",
+          amount:          amt,
+          narration:       (notes.trim() || "HP payment") + " — via collector " + collector.name,
+          reference:       ref,
+          balance_after:   currentBal,
+          channel:         "collection",
+          poster_name:     collector.name,
+          hp_agreement_id: hp.id,
+          loan_id:         loanId || null,
+          status:          "completed",
+          created_at:      new Date().toISOString(),
+        });
+        if (te) throw new Error("Transaction failed: " + te.message);
+
+        msg = (custName || account.account_number) + "\nHP payment: " + GHS(amt) +
+          "\nRemaining: " + GHS(newRemaining) +
+          (newHPStatus === "completed" ? "\n\u2705 HP fully paid!" : "");
+      }
+
+      // ── Record in collections ─────────────────────────────────────────────
+      const { error: ce } = await supabase.from("collections").insert({
+        account_id:      account.id,
+        collector_id:    collector.id,
+        collector_name:  collector.name,
+        customer_id:     custId,
+        customer_name:   custName,
+        amount:          amt,
+        payment_type:    collType,
+        loan_id:         loanId,
+        hp_agreement_id: hpId,
+        notes:           notes.trim() || TYPES.find(t => t.key === collType)?.label,
+        status:          "completed",
+        created_at:      new Date().toISOString(),
+      });
+      if (ce) throw new Error("Collection record failed: " + ce.message);
+
+      // ── Update collector total ────────────────────────────────────────────
+      const { data: col } = await supabase.from("collectors")
+        .select("total_collected").eq("id", collector.id).single();
+      if (col) {
+        await supabase.from("collectors").update({
+          total_collected: Number(col.total_collected || 0) + amt,
+          updated_at:      new Date().toISOString(),
+        }).eq("id", collector.id);
+      }
+
+      Alert.alert("Posted", msg, [
+        { text:"New Collection", onPress:reset },
+        { text:"Done", onPress:reset },
+      ]);
     } catch (e) {
-      Alert.alert('Error', e.message || 'Failed to record collection');
+      Alert.alert("Error", e.message || "Failed to post. Please try again.");
     }
-    setSaving(false);
+    setSubmitting(false);
   };
 
-  // ── Success screen ────────────────────────────────────────────────────────
-  if (done) {
-    const icons = { posted: '✅', pending: '⏳', offline: '📋' };
-    const titles = { posted: 'Payment Recorded!', pending: 'Awaiting Approval', offline: 'Saved Offline' };
-    const msgs = {
-      posted:  'Collection saved and posted successfully.',
-      pending: 'This payment exceeds the approval limit. It will post once a manager approves.',
-      offline: 'No internet. This payment is queued and will sync when you go online.',
-    };
-    const bgColors = { posted: C.greenLt, pending: C.amberLt, offline: '#fef9c3' };
-    const pt = PAYMENT_TYPES.find(t => t.key === done.paymentType);
-    return (
-      <ScrollView contentContainerStyle={S.successWrap}>
-        <View style={[S.successIconBox, { backgroundColor: bgColors[done.status] }]}>
-          <Text style={{ fontSize: 52 }}>{icons[done.status]}</Text>
-        </View>
-        <Text style={S.successTitle}>{titles[done.status]}</Text>
-        <Text style={S.successMsg}>{msgs[done.status]}</Text>
-
-        <View style={[S.typeBadge, { backgroundColor: pt?.bg, borderColor: pt?.border }]}>
-          <Text style={{ fontSize: 16 }}>{pt?.icon}</Text>
-          <Text style={[S.typeBadgeTxt, { color: pt?.color }]}>{pt?.label}</Text>
-        </View>
-
-        <View style={S.receipt}>
-          {[
-            ['Customer',    done.customer],
-            ['Account',     done.account],
-            ['Amount',      GHS(done.amount)],
-            done.newBalance != null ? ['New Balance', GHS(done.newBalance)] : ['Applied To', done.paymentType === 'loan' ? 'Loan Outstanding' : 'HP Agreement'],
-            ['Reference',   done.ref],
-            ['Date',        new Date().toLocaleString()],
-          ].map(([k, v]) => (
-            <View key={k} style={S.receiptRow}>
-              <Text style={S.receiptKey}>{k}</Text>
-              <Text style={S.receiptVal}>{v}</Text>
-            </View>
-          ))}
-        </View>
-
-        <TouchableOpacity style={S.doneBtn} onPress={reset}>
-          <Text style={S.doneBtnTxt}>Record Another</Text>
-        </TouchableOpacity>
-        {onDone && (
-          <TouchableOpacity style={S.doneBtnGhost} onPress={onDone}>
-            <Text style={S.doneBtnGhostTxt}>Back to Dashboard</Text>
-          </TouchableOpacity>
-        )}
-      </ScrollView>
-    );
-  }
-
-  // ── Step progress bar ─────────────────────────────────────────────────────
-  const stepLabels = paymentType === 'savings'
-    ? ['Customer', 'Type', 'Account', 'Amount']
-    : ['Customer', 'Type', 'Account', paymentType === 'loan' ? 'Loan' : 'HP', 'Amount'];
-  const totalSteps = stepLabels.length;
+  const amtNum  = parseFloat(amount) || 0;
+  const selType = TYPES.find(t => t.key === collType);
+  const newBal  = collType === "savings" ? Number(account?.balance || 0) + amtNum : null;
 
   return (
-    <ScrollView style={S.root} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView style={{ flex:1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <ScrollView style={S.root} contentContainerStyle={{ paddingBottom:48 }}
+        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-      {/* Page title */}
-      <Text style={S.pageTitle}>Record Collection</Text>
-
-      {/* Step bar */}
-      {selectedCustomer && (
-        <View style={S.stepBar}>
-          {stepLabels.map((label, i) => {
-            const n = i + 1;
-            const isDone   = step > n;
-            const isActive = step === n;
-            return (
-              <React.Fragment key={label}>
-                <View style={S.stepItem}>
-                  <View style={[S.stepDot,
-                    isDone   && { backgroundColor: C.green,  borderColor: C.green  },
-                    isActive && { backgroundColor: C.brand,  borderColor: C.brand  },
-                  ]}>
-                    <Text style={[S.stepNum, (isDone || isActive) && { color: '#fff' }]}>
-                      {isDone ? '✓' : n}
-                    </Text>
+        {/* Header */}
+        <View style={S.header}>
+          <Text style={S.headerTitle}>Record Collection</Text>
+          <Text style={S.headerSub}>Post cash collection to customer account</Text>
+          <View style={S.steps}>
+            {[{n:1,label:"Find Account"},{n:2,label:"Post Collection"}].map((s,i) => {
+              const active = step === s.n, done = step > s.n;
+              return (
+                <React.Fragment key={s.n}>
+                  <View style={S.stepItem}>
+                    <View style={[S.stepDot, active && S.stepDotOn, done && S.stepDotDone]}>
+                      <Text style={[S.stepDotTxt, (active||done) && {color:"#fff"}]}>
+                        {done ? "✓" : s.n}
+                      </Text>
+                    </View>
+                    <Text style={[S.stepLbl, active && S.stepLblOn, done && {color:C.brand}]}>{s.label}</Text>
                   </View>
-                  <Text style={[S.stepLabel, isActive && { color: C.brand, fontWeight: '700' }]}>{label}</Text>
-                </View>
-                {i < totalSteps - 1 && (
-                  <View style={[S.stepLine, isDone && { backgroundColor: C.green }]} />
-                )}
-              </React.Fragment>
-            );
-          })}
+                  {i < 1 && <View style={[S.stepLine, done && {backgroundColor:C.brand}]} />}
+                </React.Fragment>
+              );
+            })}
+          </View>
         </View>
-      )}
 
-      {/* ── STEP 1: Customer ── */}
-      <View style={S.card}>
-        <Text style={S.cardLabel}>STEP 1 · CUSTOMER</Text>
-        <View style={S.searchRow}>
-          <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
-          <TextInput style={S.searchInput} placeholder="Name, phone or account number…"
-            placeholderTextColor={C.text4} value={custSearch} onChangeText={setCustSearch} />
-        </View>
-        {loadingCust && <ActivityIndicator color={C.brand} style={{ marginTop: 8 }} />}
-        {customers.map(c => (
-          <TouchableOpacity key={c.id}
-            style={[S.listItem, selectedCustomer?.id === c.id && S.listItemActive]}
-            onPress={() => selectCustomer(c)}>
-            <View style={[S.avatar, selectedCustomer?.id === c.id && { backgroundColor: C.brand }]}>
-              <Text style={[S.avatarTxt, selectedCustomer?.id === c.id && { color: '#fff' }]}>
-                {c.name[0].toUpperCase()}
-              </Text>
+        {/* ── STEP 1 ── */}
+        {step === 1 && (
+          <View style={S.card}>
+            <Text style={S.cardTitle}>Find Customer Account</Text>
+            <Text style={S.cardSub}>Search by account number or customer name</Text>
+
+            <View style={S.searchRow}>
+              <TextInput
+                style={S.searchInput}
+                placeholder="Account number or name..."
+                placeholderTextColor={C.text4}
+                value={query}
+                onChangeText={v => { setQuery(v); setResults([]); }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                onSubmitEditing={searchAccount}
+              />
+              <TouchableOpacity style={[S.searchBtn, searching && {opacity:0.6}]}
+                onPress={searchAccount} disabled={searching}>
+                {searching
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={S.searchBtnTxt}>Search</Text>}
+              </TouchableOpacity>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[S.listName, selectedCustomer?.id === c.id && { color: C.brand }]}>{c.name}</Text>
-              <Text style={S.listSub}>{c.phone}</Text>
-            </View>
-            {selectedCustomer?.id === c.id && <Text style={{ color: C.brand, fontSize: 18 }}>✓</Text>}
-          </TouchableOpacity>
-        ))}
-        {custSearch.length >= 2 && customers.length === 0 && !loadingCust && (
-          <Text style={S.emptyTxt}>No customers found</Text>
-        )}
-        {selectedCustomer && customers.length === 0 && (
-          <View style={S.selectedBox}>
-            <Text style={S.selectedName}>✓ {selectedCustomer.name}</Text>
-            <Text style={S.selectedSub}>{selectedCustomer.phone}</Text>
-            <TouchableOpacity onPress={() => { setSelectedCustomer(null); setCustSearch(''); setStep(1); }}>
-              <Text style={{ color: C.red, fontSize: 12, fontWeight: '700', marginTop: 4 }}>Change</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
 
-      {/* ── STEP 2: Payment Type ── */}
-      {selectedCustomer && (
-        <View style={S.card}>
-          <Text style={S.cardLabel}>STEP 2 · PAYMENT TYPE</Text>
-          <View style={S.typeGrid}>
-            {PAYMENT_TYPES.map(pt => (
-              <TouchableOpacity key={pt.key}
-                style={[S.typeBtn, paymentType === pt.key && { borderColor: pt.color, backgroundColor: pt.bg }]}
-                onPress={() => selectType(pt.key)}>
-                <Text style={{ fontSize: 24, marginBottom: 4 }}>{pt.icon}</Text>
-                <Text style={[S.typeBtnTxt, paymentType === pt.key && { color: pt.color, fontWeight: '800' }]}>
-                  {pt.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
-
-      {/* ── STEP 3: Account ── */}
-      {selectedCustomer && step >= 3 && (
-        <View style={S.card}>
-          <Text style={S.cardLabel}>STEP 3 · ACCOUNT</Text>
-          {accounts.length === 0
-            ? <Text style={S.emptyTxt}>No active accounts</Text>
-            : accounts.map(a => (
-              <TouchableOpacity key={a.id}
-                style={[S.listItem, selectedAccount?.id === a.id && S.listItemActive]}
-                onPress={() => { setSelectedAccount(a); setStep(paymentType === 'savings' ? 5 : 4); }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[S.listName, selectedAccount?.id === a.id && { color: C.brand }]}>
-                    {a.account_number}
-                  </Text>
-                  <Text style={S.listSub}>{(a.type || '').replace(/_/g, ' ')} · {GHS(a.balance)}</Text>
-                </View>
-                {selectedAccount?.id === a.id && <Text style={{ color: C.brand, fontSize: 18 }}>✓</Text>}
-              </TouchableOpacity>
-            ))}
-        </View>
-      )}
-
-      {/* ── STEP 4a: Loan ── */}
-      {selectedCustomer && step >= 4 && paymentType === 'loan' && (
-        <View style={S.card}>
-          <Text style={S.cardLabel}>STEP 4 · SELECT LOAN</Text>
-          {loans.length === 0
-            ? <Text style={S.emptyTxt}>No active loans</Text>
-            : loans.map(l => (
-              <TouchableOpacity key={l.id}
-                style={[S.listItem, selectedLoan?.id === l.id && S.listItemActive]}
-                onPress={() => { setSelectedLoan(l); setStep(5); }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[S.listName, selectedLoan?.id === l.id && { color: C.blue }]}>
-                    {(l.type || '').replace(/_/g, ' ')}
-                  </Text>
-                  <Text style={S.listSub}>
-                    Outstanding: {GHS(l.outstanding)} · Monthly: {GHS(l.monthly_payment)}
-                  </Text>
-                </View>
-                {selectedLoan?.id === l.id && <Text style={{ color: C.blue, fontSize: 18 }}>✓</Text>}
-              </TouchableOpacity>
-            ))}
-        </View>
-      )}
-
-      {/* ── STEP 4b: HP ── */}
-      {selectedCustomer && step >= 4 && paymentType === 'hp' && (
-        <View style={S.card}>
-          <Text style={S.cardLabel}>STEP 4 · SELECT HP AGREEMENT</Text>
-          {hpAgreements.length === 0
-            ? <Text style={S.emptyTxt}>No active HP agreements</Text>
-            : hpAgreements.map(a => (
-              <TouchableOpacity key={a.id}
-                style={[S.listItem, selectedHP?.id === a.id && S.listItemActive]}
-                onPress={() => { setSelectedHP(a); setStep(5); }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[S.listName, selectedHP?.id === a.id && { color: C.purple }]}>
-                    {a.item_name}
-                  </Text>
-                  <Text style={S.listSub}>
-                    Remaining: {GHS(a.remaining)} · Suggested: {GHS(a.suggested_payment)}/{a.payment_frequency}
-                  </Text>
-                </View>
-                {selectedHP?.id === a.id && <Text style={{ color: C.purple, fontSize: 18 }}>✓</Text>}
-              </TouchableOpacity>
-            ))}
-        </View>
-      )}
-
-      {/* ── STEP 5: Amount ── */}
-      {selectedCustomer && step >= 5 && selectedAccount && (
-        <View style={S.card}>
-          <Text style={S.cardLabel}>{paymentType !== 'savings' ? 'STEP 5' : 'STEP 4'} · AMOUNT</Text>
-
-          {/* Balance preview */}
-          <View style={S.balBox}>
-            <Text style={S.balLabel}>Account Balance</Text>
-            <Text style={S.balAmt}>{GHS(selectedAccount.balance)}</Text>
-            <Text style={S.balAcct}>{selectedAccount.account_number}</Text>
-          </View>
-
-          <TextInput style={S.amountInput} placeholder="0.00" placeholderTextColor={C.text3}
-            value={amount} onChangeText={setAmount} keyboardType="decimal-pad" autoFocus />
-
-          {/* Quick fill */}
-          {paymentType === 'loan' && selectedLoan && (
-            <View style={S.quickRow}>
-              <Text style={S.quickLabel}>Quick fill:</Text>
-              {[selectedLoan.monthly_payment, selectedLoan.outstanding]
-                .filter(v => v > 0)
-                .map((v, i) => (
-                  <TouchableOpacity key={i} style={S.quickBtn} onPress={() => setAmount(String(v))}>
-                    <Text style={S.quickBtnTxt}>{i === 0 ? 'Monthly' : 'Full'} {GHS(v)}</Text>
+            {results.length > 0 && (
+              <View style={{marginTop:14}}>
+                <Text style={S.fieldLabel}>Select Account</Text>
+                {results.map(r => (
+                  <TouchableOpacity key={r.id} style={S.resultRow}
+                    onPress={() => { setAccount(r); setResults([]); setStep(2); }} activeOpacity={0.7}>
+                    <View style={S.resultAvatar}>
+                      <Text style={S.resultAvatarTxt}>{(r.customer?.name||"A")[0].toUpperCase()}</Text>
+                    </View>
+                    <View style={{flex:1}}>
+                      <Text style={S.resultName}>{r.customer?.name||"—"}</Text>
+                      <Text style={S.resultMeta}>{r.account_number} · {r.type}</Text>
+                    </View>
+                    <Text style={S.resultBal}>{GHS(r.balance)}</Text>
                   </TouchableOpacity>
                 ))}
-            </View>
-          )}
-          {paymentType === 'hp' && selectedHP && (
-            <View style={S.quickRow}>
-              <Text style={S.quickLabel}>Quick fill:</Text>
-              {[selectedHP.suggested_payment, selectedHP.remaining]
-                .filter(v => v > 0)
-                .map((v, i) => (
-                  <TouchableOpacity key={i} style={S.quickBtn} onPress={() => setAmount(String(v))}>
-                    <Text style={S.quickBtnTxt}>{i === 0 ? 'Suggested' : 'Full'} {GHS(v)}</Text>
-                  </TouchableOpacity>
-                ))}
-            </View>
-          )}
+              </View>
+            )}
+          </View>
+        )}
 
-          <TextInput style={[S.input, { marginTop: 12 }]} placeholder="Notes (optional)"
-            placeholderTextColor={C.text4} value={notes} onChangeText={setNotes} multiline />
+        {/* ── STEP 2 ── */}
+        {step === 2 && account && (
+          <>
+            {/* Account banner */}
+            <View style={S.acctBanner}>
+              <View style={S.acctAvatar}>
+                <Text style={S.acctAvatarTxt}>{(account.customer?.name||"A")[0].toUpperCase()}</Text>
+              </View>
+              <View style={{flex:1}}>
+                <Text style={S.acctName}>{account.customer?.name||"—"}</Text>
+                <Text style={S.acctMeta}>{account.account_number}{account.customer?.phone ? " · "+account.customer.phone : ""}</Text>
+                <Text style={S.acctType}>{(account.type||"").replace(/_/g," ")}</Text>
+              </View>
+              <View style={{alignItems:"flex-end"}}>
+                <Text style={S.balLabel}>Balance</Text>
+                <Text style={S.balAmt}>{GHS(account.balance)}</Text>
+                <TouchableOpacity style={S.changeBtn} onPress={reset}>
+                  <Text style={S.changeBtnTxt}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-          <TouchableOpacity style={[S.submitBtn, saving && { opacity: 0.6 }]}
-            onPress={handleSubmit} disabled={saving}>
-            {saving
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={S.submitBtnTxt}>
-                  {paymentType === 'savings' ? '💰 Record Deposit' : paymentType === 'loan' ? '📋 Record Repayment' : '🛍️ Record HP Payment'}
-                </Text>}
-          </TouchableOpacity>
-        </View>
-      )}
-    </ScrollView>
+            <View style={S.card}>
+              {/* Type selector */}
+              <Text style={S.fieldLabel}>Payment Type</Text>
+              <View style={S.typeRow}>
+                {TYPES.map(t => {
+                  const on = collType === t.key;
+                  return (
+                    <TouchableOpacity key={t.key}
+                      style={[S.typeBtn, on && {borderColor:t.color, backgroundColor:t.bg}]}
+                      onPress={() => setCollType(t.key)} activeOpacity={0.75}>
+                      <Text style={[S.typeBtnLabel, on && {color:t.color}]}>{t.label}</Text>
+                      <Text style={S.typeBtnSub} numberOfLines={2}>{t.sub}</Text>
+                      {on && <View style={[S.typeCheck, {backgroundColor:t.color}]}><Text style={S.typeCheckTxt}>✓</Text></View>}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Amount */}
+              <Text style={[S.fieldLabel, {marginTop:18}]}>Amount (GH₵)</Text>
+              <View style={[S.amtWrap, amtNum > 0 && {borderColor:selType?.color}]}>
+                <Text style={[S.amtPrefix, {color:selType?.color||C.text3}]}>GH₵</Text>
+                <TextInput
+                  style={S.amtInput}
+                  placeholder="0.00"
+                  placeholderTextColor={C.text4}
+                  value={amount}
+                  onChangeText={setAmount}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+
+              {/* Preview */}
+              {amtNum > 0 && (
+                <View style={[S.preview, {borderColor:(selType?.color||C.brand)+"30", backgroundColor:(selType?.bg||C.blueBg)+"80"}]}>
+                  {collType === "savings" ? (
+                    <>
+                      <Text style={[S.previewLabel, {color:selType?.color}]}>New balance after deposit</Text>
+                      <Text style={[S.previewAmt, {color:selType?.color}]}>{GHS(newBal)}</Text>
+                    </>
+                  ) : (
+                    <Text style={[S.previewLabel, {color:selType?.color}]}>
+                      {collType === "loan" ? "Reduces loan outstanding by" : "Reduces HP balance by"} {GHS(amtNum)}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Notes */}
+              <Text style={[S.fieldLabel, {marginTop:18}]}>Notes (optional)</Text>
+              <TextInput
+                style={S.notesInput}
+                placeholder="Receipt no., remarks..."
+                placeholderTextColor={C.text4}
+                value={notes}
+                onChangeText={setNotes}
+                autoCapitalize="sentences"
+                multiline
+              />
+
+              <TouchableOpacity
+                style={[S.postBtn, {backgroundColor:selType?.color||C.brand}, (submitting||amtNum<=0) && {opacity:0.45}]}
+                onPress={postCollection} disabled={submitting||amtNum<=0} activeOpacity={0.85}>
+                {submitting
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={S.postBtnTxt}>Post {selType?.label||"Collection"}</Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity style={S.cancelBtn} onPress={reset}>
+                <Text style={S.cancelBtnTxt}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const S = StyleSheet.create({
-  root:          { flex: 1, backgroundColor: C.bg },
-  pageTitle:     { fontSize: 24, fontWeight: '900', color: C.text, marginBottom: 16 },
+  root:          { flex:1, backgroundColor:C.bg },
 
-  // Step bar
-  stepBar:       { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 4 },
-  stepItem:      { alignItems: 'center' },
-  stepDot:       { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: C.border, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center' },
-  stepNum:       { fontSize: 11, fontWeight: '800', color: C.text4 },
-  stepLabel:     { fontSize: 10, color: C.text4, fontWeight: '600', marginTop: 4 },
-  stepLine:      { flex: 1, height: 2, backgroundColor: C.border, marginHorizontal: 4, marginBottom: 14 },
+  // Header
+  header:        { backgroundColor:C.bgDark, paddingHorizontal:20, paddingTop:18, paddingBottom:24 },
+  headerTitle:   { fontSize:20, fontWeight:"700", color:"#fff", marginBottom:2 },
+  headerSub:     { fontSize:12, color:"rgba(255,255,255,0.4)", marginBottom:20 },
+  steps:         { flexDirection:"row", alignItems:"center" },
+  stepItem:      { flexDirection:"row", alignItems:"center", gap:6 },
+  stepDot:       { width:22, height:22, borderRadius:11, borderWidth:1.5, borderColor:"rgba(255,255,255,0.2)", alignItems:"center", justifyContent:"center" },
+  stepDotOn:     { borderColor:C.brand, backgroundColor:C.brand },
+  stepDotDone:   { borderColor:C.brandDk, backgroundColor:C.brandDk },
+  stepDotTxt:    { fontSize:10, fontWeight:"700", color:"rgba(255,255,255,0.3)" },
+  stepLbl:       { fontSize:12, color:"rgba(255,255,255,0.35)" },
+  stepLblOn:     { color:"#fff", fontWeight:"600" },
+  stepLine:      { flex:1, height:1, backgroundColor:"rgba(255,255,255,0.1)", marginHorizontal:10 },
 
-  // Cards
-  card:          { backgroundColor: C.white, borderRadius: 16, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: C.border, ...C.shadowSm },
-  cardLabel:     { fontSize: 11, fontWeight: '800', color: C.text4, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 14 },
+  // Card
+  card:          { backgroundColor:C.bgCard, marginHorizontal:16, marginTop:14, borderRadius:14, padding:18, borderWidth:1, borderColor:C.border },
+  cardTitle:     { fontSize:16, fontWeight:"700", color:C.text, marginBottom:2 },
+  cardSub:       { fontSize:13, color:C.text3, marginBottom:16 },
 
   // Search
-  searchRow:     { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, marginBottom: 10 },
-  searchInput:   { flex: 1, paddingVertical: 11, fontSize: 14, color: C.text },
+  searchRow:     { flexDirection:"row", gap:8 },
+  searchInput:   { flex:1, backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:10, paddingHorizontal:14, paddingVertical:13, fontSize:14, color:C.text },
+  searchBtn:     { backgroundColor:C.bgDark, borderRadius:10, paddingHorizontal:18, justifyContent:"center", minHeight:46 },
+  searchBtnTxt:  { color:"#fff", fontSize:14, fontWeight:"600" },
 
-  // List items
-  listItem:      { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.border, marginBottom: 8, backgroundColor: C.white },
-  listItemActive:{ borderColor: C.brand, backgroundColor: C.brandLt },
-  avatar:        { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  avatarTxt:     { fontSize: 15, fontWeight: '800', color: C.text3 },
-  listName:      { fontSize: 14, fontWeight: '700', color: C.text },
-  listSub:       { fontSize: 12, color: C.text3, marginTop: 2, textTransform: 'capitalize' },
-  emptyTxt:      { fontSize: 13, color: C.text4, textAlign: 'center', paddingVertical: 12 },
+  fieldLabel:    { fontSize:11, fontWeight:"600", color:C.text3, textTransform:"uppercase", letterSpacing:0.5, marginBottom:8 },
 
-  selectedBox:   { backgroundColor: C.greenLt, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: C.greenBg },
-  selectedName:  { fontSize: 14, fontWeight: '800', color: C.green },
-  selectedSub:   { fontSize: 12, color: C.text3, marginTop: 2 },
+  // Results
+  resultRow:     { flexDirection:"row", alignItems:"center", gap:10, paddingVertical:11, paddingHorizontal:12, borderRadius:10, borderWidth:1, borderColor:C.border, marginBottom:6, backgroundColor:C.bg },
+  resultAvatar:  { width:36, height:36, borderRadius:18, backgroundColor:C.blueLt, alignItems:"center", justifyContent:"center" },
+  resultAvatarTxt:{ fontSize:14, fontWeight:"700", color:C.brand },
+  resultName:    { fontSize:14, fontWeight:"600", color:C.text, marginBottom:1 },
+  resultMeta:    { fontSize:11, color:C.text4 },
+  resultBal:     { fontSize:13, fontWeight:"600", color:C.text },
 
-  // Payment type grid
-  typeGrid:      { flexDirection: 'row', gap: 10 },
-  typeBtn:       { flex: 1, alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 2, borderColor: C.border, backgroundColor: C.white },
-  typeBtnTxt:    { fontSize: 12, fontWeight: '700', color: C.text3, textAlign: 'center' },
+  // Account banner
+  acctBanner:    { backgroundColor:C.bgDark, marginHorizontal:16, marginTop:14, borderRadius:14, padding:16, flexDirection:"row", alignItems:"flex-start", gap:12 },
+  acctAvatar:    { width:42, height:42, borderRadius:21, backgroundColor:C.brand, alignItems:"center", justifyContent:"center" },
+  acctAvatarTxt: { fontSize:17, fontWeight:"800", color:"#fff" },
+  acctName:      { fontSize:15, fontWeight:"700", color:"#fff", marginBottom:2 },
+  acctMeta:      { fontSize:11, color:"rgba(255,255,255,0.4)", marginBottom:3 },
+  acctType:      { fontSize:10, color:"rgba(255,255,255,0.5)", textTransform:"capitalize" },
+  balLabel:      { fontSize:9, color:"rgba(255,255,255,0.35)", textTransform:"uppercase", marginBottom:2 },
+  balAmt:        { fontSize:15, fontWeight:"700", color:"#fff", marginBottom:6 },
+  changeBtn:     { paddingHorizontal:10, paddingVertical:4, borderRadius:8, borderWidth:1, borderColor:"rgba(255,255,255,0.2)" },
+  changeBtnTxt:  { fontSize:11, color:"rgba(255,255,255,0.5)" },
 
-  // Balance box
-  balBox:        { backgroundColor: C.bg, borderRadius: 12, padding: 14, marginBottom: 14, alignItems: 'center', borderWidth: 1, borderColor: C.border },
-  balLabel:      { fontSize: 11, fontWeight: '700', color: C.text4, textTransform: 'uppercase', letterSpacing: 0.5 },
-  balAmt:        { fontSize: 28, fontWeight: '900', color: C.text, marginTop: 4 },
-  balAcct:       { fontSize: 12, color: C.text4, marginTop: 2, fontFamily: 'monospace' },
+  // Type selector
+  typeRow:       { flexDirection:"row", gap:6 },
+  typeBtn:       { flex:1, borderRadius:10, borderWidth:1.5, borderColor:C.border, padding:11, backgroundColor:C.bgCard, position:"relative" },
+  typeBtnLabel:  { fontSize:12, fontWeight:"700", color:C.text, marginBottom:3 },
+  typeBtnSub:    { fontSize:10, color:C.text4, lineHeight:13 },
+  typeCheck:     { position:"absolute", top:6, right:6, width:15, height:15, borderRadius:8, alignItems:"center", justifyContent:"center" },
+  typeCheckTxt:  { color:"#fff", fontSize:9, fontWeight:"900" },
 
-  // Amount input
-  amountInput:   { backgroundColor: C.bg, borderWidth: 2, borderColor: C.brand, borderRadius: 14, padding: 16, fontSize: 32, fontWeight: '900', textAlign: 'center', color: C.text, marginBottom: 8 },
-  input:         { backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text },
+  // Amount
+  amtWrap:       { flexDirection:"row", alignItems:"center", backgroundColor:C.bg, borderWidth:1.5, borderColor:C.border, borderRadius:12, overflow:"hidden" },
+  amtPrefix:     { paddingHorizontal:14, paddingVertical:15, fontSize:14, fontWeight:"700", color:C.text3 },
+  amtInput:      { flex:1, paddingVertical:14, paddingHorizontal:8, fontSize:26, fontWeight:"800", color:C.text },
 
-  // Quick fill
-  quickRow:      { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  quickLabel:    { fontSize: 12, color: C.text4, fontWeight: '600' },
-  quickBtn:      { backgroundColor: C.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: C.border },
-  quickBtnTxt:   { fontSize: 12, fontWeight: '700', color: C.text2 },
+  // Preview
+  preview:       { borderRadius:10, padding:12, marginTop:10, borderWidth:1 },
+  previewLabel:  { fontSize:12, fontWeight:"600", marginBottom:2 },
+  previewAmt:    { fontSize:18, fontWeight:"800" },
 
-  // Submit
-  submitBtn:     { backgroundColor: C.brand, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 8 },
-  submitBtnTxt:  { color: '#fff', fontSize: 16, fontWeight: '800' },
+  // Notes
+  notesInput:    { backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:10, paddingHorizontal:14, paddingVertical:12, fontSize:14, color:C.text, minHeight:68, textAlignVertical:"top" },
 
-  // Success
-  successWrap:   { flexGrow: 1, alignItems: 'center', padding: 24, paddingTop: 48 },
-  successIconBox:{ width: 100, height: 100, borderRadius: 30, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  successTitle:  { fontSize: 24, fontWeight: '900', color: C.text, marginBottom: 8, textAlign: 'center' },
-  successMsg:    { fontSize: 14, color: C.text3, textAlign: 'center', lineHeight: 20, marginBottom: 20, paddingHorizontal: 16 },
-  typeBadge:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, marginBottom: 24 },
-  typeBadgeTxt:  { fontSize: 14, fontWeight: '700' },
-  receipt:       { width: '100%', backgroundColor: C.white, borderRadius: 16, borderWidth: 1, borderColor: C.border, overflow: 'hidden', marginBottom: 24 },
-  receiptRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.borderLt },
-  receiptKey:    { fontSize: 12, color: C.text4, fontWeight: '600' },
-  receiptVal:    { fontSize: 13, fontWeight: '700', color: C.text, maxWidth: '60%', textAlign: 'right' },
-  doneBtn:       { backgroundColor: C.brand, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40, marginBottom: 12 },
-  doneBtnTxt:    { color: '#fff', fontSize: 16, fontWeight: '800' },
-  doneBtnGhost:  { paddingVertical: 10 },
-  doneBtnGhostTxt: { color: C.text3, fontSize: 14, fontWeight: '600' },
+  // Buttons
+  postBtn:       { borderRadius:12, paddingVertical:15, alignItems:"center", marginTop:20, elevation:1 },
+  postBtnTxt:    { color:"#fff", fontSize:15, fontWeight:"700" },
+  cancelBtn:     { alignItems:"center", paddingVertical:12, marginTop:2 },
+  cancelBtnTxt:  { fontSize:13, color:C.text3 },
 });

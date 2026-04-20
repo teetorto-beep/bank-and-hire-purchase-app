@@ -1,41 +1,45 @@
 export const C = {
-  brand:    '#059669',
-  brandDk:  '#047857',
-  brandLt:  '#ecfdf5',
-  brandMid: '#10b981',
-  bg:       '#f9fafb',
-  white:    '#ffffff',
-  card:     '#ffffff',
-  surface:  '#f3f4f6',
-  text:     '#111827',
-  text2:    '#374151',
-  text3:    '#6b7280',
-  text4:    '#9ca3af',
-  green:    '#059669',
-  greenBg:  '#d1fae5',
-  greenLt:  '#ecfdf5',
-  red:      '#dc2626',
-  redBg:    '#fee2e2',
-  redLt:    '#fef2f2',
-  amber:    '#d97706',
-  amberBg:  '#fef3c7',
-  amberLt:  '#fffbeb',
-  blue:     '#2563eb',
-  blueBg:   '#dbeafe',
-  blueLt:   '#eff6ff',
-  purple:   '#7c3aed',
-  purpleBg: '#ede9fe',
-  border:   '#e5e7eb',
-  borderLt: '#f3f4f6',
-  shadow:   { shadowColor: '#111827', shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
-  shadowSm: { shadowColor: '#111827', shadowOpacity: 0.04, shadowRadius: 6,  elevation: 1 },
+  brand:    "#2563EB",
+  brandDk:  "#1D4ED8",
+  brandLt:  "#EFF6FF",
+  bg:       "#F8FAFC",
+  bgDark:   "#0F172A",
+  bgCard:   "#FFFFFF",
+  text:     "#0F172A",
+  text2:    "#334155",
+  text3:    "#64748B",
+  text4:    "#94A3B8",
+  green:    "#16A34A",
+  greenBg:  "#DCFCE7",
+  red:      "#DC2626",
+  redBg:    "#FEE2E2",
+  redLt:    "#FFF1F0",
+  amber:    "#D97706",
+  amberBg:  "#FEF3C7",
+  amberLt:  "#FFFBEB",
+  blue:     "#2563EB",
+  blueBg:   "#DBEAFE",
+  blueLt:   "#EFF6FF",
+  purple:   "#7C3AED",
+  purpleBg: "#EDE9FE",
+  purpleLt: "#F5F3FF",
+  white:    "#FFFFFF",
+  border:   "#E2E8F0",
+  borderLt: "#F1F5F9",
+  shadow:   { shadowColor:"#0F172A", shadowOpacity:0.06, shadowRadius:8, elevation:2 },
 };
 
 export const GHS = n =>
-  'GH₵ ' + Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 });
+  "GH\u20B5 " + Number(n || 0).toLocaleString("en-GH", { minimumFractionDigits: 2 });
 
 export const fmtDate = d =>
-  d ? new Date(d).toLocaleDateString('en-GH', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  d ? new Date(d).toLocaleDateString("en-GH", { day:"numeric", month:"short", year:"numeric" }) : "\u2014";
 
 export const fmtDateTime = d =>
-  d ? new Date(d).toLocaleString('en-GH') : '—';
+  d ? new Date(d).toLocaleString("en-GH", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "\u2014";
+
+export const PT = {
+  savings: { color:"#16A34A", bg:"#DCFCE7", label:"Savings" },
+  loan:    { color:"#2563EB", bg:"#DBEAFE", label:"Loan"    },
+  hp:      { color:"#7C3AED", bg:"#EDE9FE", label:"HP"      },
+};

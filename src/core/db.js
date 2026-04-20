@@ -993,33 +993,38 @@ export const hpAgreementsDB = {
       ? parseInt(payload.tenure)
       : freq === 'daily' ? 6 : freq === 'weekly' ? 12 : 24;
 
-    // ── Calculate total repayment WITH interest ────────────────────────────
-    // Using standard amortization: M = P * [r(1+r)^n] / [(1+r)^n - 1]
-    const mr = rate / 100 / 12; // monthly rate
-    let monthlyPayment = 0;
-    let totalRepayment = loanPrincipal; // fallback: no interest
+    // ── Use pre-calculated values if provided (from LoanApplication form) ──
+    // This ensures the stored values match exactly what was shown to the user,
+    // regardless of calculation method (flat rate vs amortization).
+    let monthlyPayment, totalRepayment;
 
-    if (loanPrincipal > 0 && rate > 0 && tenure > 0) {
-      if (mr > 0) {
+    if (payload.monthlyPayment && payload.totalRepayment) {
+      // Trust the caller — they already computed and showed these to the user
+      monthlyPayment = Math.round(Number(payload.monthlyPayment) * 100) / 100;
+      totalRepayment = Math.round(Number(payload.totalRepayment) * 100) / 100;
+    } else {
+      // Fallback: recalculate using amortization
+      const mr = rate / 100 / 12;
+      if (loanPrincipal > 0 && rate > 0 && tenure > 0 && mr > 0) {
         monthlyPayment = (loanPrincipal * mr * Math.pow(1 + mr, tenure)) / (Math.pow(1 + mr, tenure) - 1);
-      } else {
+        totalRepayment = monthlyPayment * tenure;
+      } else if (loanPrincipal > 0 && tenure > 0) {
         monthlyPayment = loanPrincipal / tenure;
+        totalRepayment = loanPrincipal;
+      } else {
+        monthlyPayment = 0;
+        totalRepayment = loanPrincipal;
       }
-      totalRepayment = monthlyPayment * tenure;
-    } else if (loanPrincipal > 0 && tenure > 0) {
-      monthlyPayment = loanPrincipal / tenure;
-      totalRepayment = loanPrincipal;
+      monthlyPayment = Math.round(monthlyPayment * 100) / 100;
+      totalRepayment = Math.round(totalRepayment * 100) / 100;
     }
 
-    monthlyPayment = Math.round(monthlyPayment * 100) / 100;
-    totalRepayment = Math.round(totalRepayment * 100) / 100;
     const totalInterest = Math.round((totalRepayment - loanPrincipal) * 100) / 100;
 
     // Suggested payment per frequency
     let suggestedPayment = payload.suggestedPayment ?? payload.suggested_payment ?? 0;
     if (!suggestedPayment || suggestedPayment === 0) {
       if (freq === 'daily') {
-        // Daily: spread total repayment over tenure months * ~30 days
         suggestedPayment = Math.round((totalRepayment / (tenure * 30)) * 100) / 100;
       } else if (freq === 'weekly') {
         suggestedPayment = Math.round((totalRepayment / (tenure * 4)) * 100) / 100;
@@ -1028,10 +1033,10 @@ export const hpAgreementsDB = {
       }
     }
 
-    // The agreement total_price = item price + interest (what customer actually owes)
-    // remaining starts at totalRepayment - downPayment
-    const agrTotalPrice = downPayment + totalRepayment; // full cost to customer
-    const agrRemaining = totalRepayment; // what's left after down payment (interest-inclusive)
+    // total_price = item price (what the item costs, not including interest)
+    // remaining = totalRepayment (principal + interest = what customer still owes)
+    const agrTotalPrice = itemPrice;
+    const agrRemaining  = totalRepayment;
 
     // 1. Create the HP agreement
     const agrRow = clean({

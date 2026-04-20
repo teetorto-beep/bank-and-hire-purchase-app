@@ -169,6 +169,10 @@ export default function LoanApplication() {
           tenure,
           paymentFrequency: form.paymentFrequency,
           purpose:          form.purpose,
+          // Pass pre-calculated values so db.js doesn't recalculate with a different method
+          monthlyPayment:   monthly,
+          totalRepayment:   totalRepay,
+          suggestedPayment: monthly,
         };
         const { data, error: err } = await createHPAgreementWithLoan(payload);
         if (err) throw new Error(err.message || 'Failed to create HP agreement.');

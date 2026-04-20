@@ -1,219 +1,357 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
-import { supabase } from '../supabase';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import { C, GHS, fmtDateTime } from '../theme';
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, RefreshControl, Alert, TextInput, Modal,
+} from "react-native";
+import { supabase } from "../supabase";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import { C, GHS, fmtDateTime, PT } from "../theme";
 
-const PERIODS = [
-  { key: 'today', label: 'Today' },
-  { key: 'week',  label: 'This Week' },
-  { key: 'month', label: 'This Month' },
-  { key: 'all',   label: 'All Time' },
-];
-
-function getRange(key) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (key === 'today') return [today.toISOString(), now.toISOString()];
-  if (key === 'week')  { const w = new Date(today); w.setDate(w.getDate() - 7); return [w.toISOString(), now.toISOString()]; }
-  if (key === 'month') { return [new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), now.toISOString()]; }
-  return [null, null];
+// ── Simple date-only input (YYYY-MM-DD) ──────────────────────────────────────
+function DateInput({ label, value, onChange, placeholder }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={DS.dateLabel}>{label}</Text>
+      <View style={[DS.dateBox, focused && DS.dateBoxFocus]}>
+        <Text style={DS.dateIcon}>&#128197;</Text>
+        <TextInput
+          style={DS.dateInput}
+          placeholder={placeholder || "YYYY-MM-DD"}
+          placeholderTextColor={C.text4}
+          value={value}
+          onChangeText={onChange}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          keyboardType="numeric"
+          maxLength={10}
+        />
+      </View>
+    </View>
+  );
 }
 
-const PT = { savings: { color: C.green, bg: C.greenBg, label: 'Savings' }, loan: { color: C.blue, bg: C.blueBg, label: 'Loan' }, hp: { color: C.purple, bg: C.purpleBg, label: 'HP' } };
+const QUICK = [
+  { key: "today", label: "Today" },
+  { key: "week",  label: "7 Days" },
+  { key: "month", label: "This Month" },
+  { key: "all",   label: "All Time" },
+];
 
-export default function ReportScreen({ collector, onLogout }) {
-  const [period,      setPeriod]      = useState('today');
+function applyQuick(key) {
+  const now   = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const fmt   = d => d.toISOString().slice(0, 10);
+  if (key === "today") return [fmt(today), fmt(today)];
+  if (key === "week")  { const w = new Date(today); w.setDate(w.getDate() - 6); return [fmt(w), fmt(today)]; }
+  if (key === "month") return [fmt(new Date(now.getFullYear(), now.getMonth(), 1)), fmt(today)];
+  return ["", ""];
+}
+
+function toRange(startStr, endStr) {
+  if (!startStr && !endStr) return [null, null];
+  const from = startStr ? new Date(startStr + "T00:00:00").toISOString() : null;
+  const to   = endStr   ? new Date(endStr   + "T23:59:59").toISOString() : null;
+  return [from, to];
+}
+
+export default function ReportScreen({ collector }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [startDate,   setStartDate]   = useState(today);
+  const [endDate,     setEndDate]     = useState(today);
+  const [activeQuick, setActiveQuick] = useState("today");
   const [collections, setCollections] = useState([]);
-  const [loading,     setLoading]     = useState(false);
+  const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [exporting,   setExporting]   = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true); else setLoading(true);
     try {
-      const [from, to] = getRange(period);
-      let q = supabase.from('collections').select('*, accounts(account_number, balance)')
-        .eq('collector_id', collector.id).order('created_at', { ascending: false });
-      if (from) q = q.gte('created_at', from);
-      if (to)   q = q.lte('created_at', to);
+      const [from, to] = toRange(startDate, endDate);
+      let q = supabase.from("collections")
+        .select("*, accounts(account_number, balance)")
+        .eq("collector_id", collector.id)
+        .order("created_at", { ascending: false });
+      if (from) q = q.gte("created_at", from);
+      if (to)   q = q.lte("created_at", to);
       const { data } = await q;
       setCollections(data || []);
     } catch (_) {}
     if (refresh) setRefreshing(false); else setLoading(false);
-  }, [period, collector.id]);
+  }, [startDate, endDate, collector.id]);
 
   useEffect(() => { load(); }, [load]);
 
-  const total    = collections.reduce((s, c) => s + Number(c.amount || 0), 0);
-  const byType   = { savings: 0, loan: 0, hp: 0 };
-  collections.forEach(c => { const t = c.payment_type || 'savings'; byType[t] = (byType[t] || 0) + Number(c.amount || 0); });
+  const handleQuick = (key) => {
+    setActiveQuick(key);
+    const [s, e] = applyQuick(key);
+    setStartDate(s); setEndDate(e);
+  };
+
+  const handleSearch = () => { load(); };
+
+  const total  = collections.reduce((s, c) => s + Number(c.amount || 0), 0);
+  const byType = { savings: 0, loan: 0, hp: 0 };
+  collections.forEach(c => {
+    const t = c.payment_type || "savings";
+    byType[t] = (byType[t] || 0) + Number(c.amount || 0);
+  });
+
+  const rangeLabel = startDate && endDate
+    ? (startDate === endDate ? startDate : startDate + " → " + endDate)
+    : startDate || endDate || "All Time";
 
   const handleExport = async () => {
-    if (!collections.length) { Alert.alert('No Data', 'No collections to export'); return; }
+    if (!collections.length) { Alert.alert("No Data", "No collections to export for this period"); return; }
     setExporting(true);
     try {
-      const periodLabel = PERIODS.find(p => p.key === period)?.label || period;
       const rows = collections.map((c, i) => {
-        const pt = c.payment_type || 'savings';
-        const col = { savings: '#059669', loan: '#2563eb', hp: '#7c3aed' }[pt] || '#64748b';
-        return `<tr style="background:${i%2===0?'#f9fafb':'#fff'}">
-          <td>${i+1}</td>
+        const pt  = c.payment_type || "savings";
+        const col = { savings: "#16A34A", loan: "#2563EB", hp: "#7C3AED" }[pt] || "#64748b";
+        return `<tr style="background:${i % 2 === 0 ? "#f9fafb" : "#fff"}">
+          <td>${i + 1}</td>
           <td>${fmtDateTime(c.created_at)}</td>
-          <td><strong>${c.customer_name||'—'}</strong></td>
-          <td style="font-family:monospace">${c.accounts?.account_number||'—'}</td>
-          <td><span style="background:${col}20;color:${col};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${PT[pt]?.label||pt}</span></td>
-          <td style="text-align:right;font-weight:700;color:#059669">GH₵ ${Number(c.amount||0).toLocaleString('en-GH',{minimumFractionDigits:2})}</td>
-          <td style="text-align:right">${c.accounts?'GH₵ '+Number(c.accounts.balance||0).toLocaleString('en-GH',{minimumFractionDigits:2}):'—'}</td>
-          <td style="color:#6b7280;font-size:11px">${c.notes||'—'}</td>
+          <td><strong>${c.customer_name || "—"}</strong></td>
+          <td style="font-family:monospace">${c.accounts?.account_number || "—"}</td>
+          <td><span style="background:${col}20;color:${col};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${PT[pt]?.label || pt}</span></td>
+          <td style="text-align:right;font-weight:700;color:#2563EB">GH₵ ${Number(c.amount || 0).toLocaleString("en-GH", { minimumFractionDigits: 2 })}</td>
+          <td style="color:#6b7280;font-size:11px">${c.notes || "—"}</td>
         </tr>`;
-      }).join('');
+      }).join("");
+
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-      <style>body{font-family:Arial,sans-serif;margin:0;padding:20px;font-size:12px;color:#111827}
-      .hdr{background:#059669;color:#fff;padding:16px 20px;border-radius:8px;margin-bottom:20px}
-      .hdr h1{margin:0 0 4px;font-size:18px}.hdr p{margin:0;font-size:12px;color:rgba(255,255,255,0.7)}
-      .meta{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
-      .mc{background:#f3f4f6;border-radius:8px;padding:10px 14px;flex:1;min-width:100px}
-      .mc .lbl{font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase}
-      .mc .val{font-size:16px;font-weight:800;color:#111827;margin-top:2px}
-      table{width:100%;border-collapse:collapse}
-      th{background:#059669;color:#fff;padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase}
-      td{padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:12px}
-      .footer{margin-top:20px;text-align:center;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:12px}
-      </style></head><body>
-      <div class="hdr"><h1>Majupat Love Enterprise</h1><p>Collection Report — ${collector.name}${collector.zone?' · '+collector.zone:''}</p></div>
-      <div class="meta">
-        <div class="mc"><div class="lbl">Period</div><div class="val">${periodLabel}</div></div>
-        <div class="mc"><div class="lbl">Total</div><div class="val">GH₵ ${Number(total).toLocaleString('en-GH',{minimumFractionDigits:2})}</div></div>
-        <div class="mc"><div class="lbl">Collections</div><div class="val">${collections.length}</div></div>
-        <div class="mc"><div class="lbl">Generated</div><div class="val" style="font-size:11px">${new Date().toLocaleString()}</div></div>
-      </div>
-      <table><thead><tr><th>#</th><th>Date & Time</th><th>Customer</th><th>Account</th><th>Type</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th><th>Notes</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-      <div class="footer">Maxbraynn Technology & Systems · Majupat Love Enterprise</div>
-      </body></html>`;
+        <style>
+          body{font-family:Arial,sans-serif;margin:0;padding:20px;font-size:12px;color:#111827}
+          .hdr{background:linear-gradient(135deg,#0D1B2A,#1E3A5F);color:#fff;padding:20px 24px;border-radius:12px;margin-bottom:20px}
+          .hdr h1{margin:0 0 4px;font-size:20px;font-weight:900}.hdr p{margin:0;font-size:12px;color:rgba(255,255,255,0.6)}
+          .meta{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+          .mc{background:#f3f4f6;border-radius:10px;padding:12px 16px;flex:1;min-width:100px;border-left:3px solid #2563EB}
+          .mc .lbl{font-size:10px;color:#6b7280;font-weight:700;text-transform:uppercase;margin-bottom:4px}
+          .mc .val{font-size:16px;font-weight:900;color:#111827}
+          table{width:100%;border-collapse:collapse}
+          th{background:#0D1B2A;color:#fff;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px}
+          td{padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px}
+          .footer{margin-top:24px;text-align:center;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:14px}
+        </style></head><body>
+        <div class="hdr">
+          <h1>Majupat Love Enterprise</h1>
+          <p>Collection Report — ${collector.name}${collector.zone ? " · " + collector.zone : ""} · ${rangeLabel}</p>
+        </div>
+        <div class="meta">
+          <div class="mc"><div class="lbl">Period</div><div class="val">${rangeLabel}</div></div>
+          <div class="mc"><div class="lbl">Total Collected</div><div class="val">GH₵ ${Number(total).toLocaleString("en-GH", { minimumFractionDigits: 2 })}</div></div>
+          <div class="mc"><div class="lbl">Transactions</div><div class="val">${collections.length}</div></div>
+          <div class="mc"><div class="lbl">Generated</div><div class="val" style="font-size:11px">${new Date().toLocaleString()}</div></div>
+        </div>
+        <table><thead><tr>
+          <th>#</th><th>Date &amp; Time</th><th>Customer</th><th>Account</th>
+          <th>Type</th><th style="text-align:right">Amount</th><th>Notes</th>
+        </tr></thead><tbody>${rows}</tbody></table>
+        <div class="footer">Maxbraynn Technology &amp; Systems · Majupat Love Enterprise</div>
+        </body></html>`;
+
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `Collections - ${collector.name}`, UTI: 'com.adobe.pdf' });
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Collections — " + collector.name, UTI: "com.adobe.pdf" });
       } else {
-        Alert.alert('PDF Created', uri);
+        Alert.alert("PDF Created", uri);
       }
-    } catch (e) { Alert.alert('Export Failed', e.message); }
+    } catch (e) { Alert.alert("Export Failed", e.message); }
     setExporting(false);
   };
 
   return (
-    <ScrollView style={S.root} contentContainerStyle={{ paddingBottom: 32 }}
+    <ScrollView style={S.root} contentContainerStyle={{ paddingBottom: 48 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={C.brand} />}
       showsVerticalScrollIndicator={false}>
 
-      {/* Hero card */}
-      <View style={S.hero}>
-        <View style={S.heroDecor} />
-        <Text style={S.heroLabel}>Total Collected</Text>
-        <Text style={S.heroAmt}>{GHS(total)}</Text>
-        <Text style={S.heroSub}>{collections.length} collection{collections.length !== 1 ? 's' : ''} · {PERIODS.find(p => p.key === period)?.label}</Text>
-        <View style={S.heroStats}>
-          {Object.entries(byType).map(([k, v], i) => (
-            <React.Fragment key={k}>
-              {i > 0 && <View style={S.heroStatDiv} />}
-              <View style={S.heroStat}>
-                <Text style={S.heroStatLabel}>{PT[k]?.label}</Text>
-                <Text style={[S.heroStatVal, { color: PT[k]?.color || C.text }]}>{GHS(v)}</Text>
-              </View>
-            </React.Fragment>
-          ))}
+      {/* Header */}
+      <View style={S.header}>
+        <View style={S.headerRow}>
+          <View>
+            <Text style={S.headerTitle}>Reports</Text>
+            <Text style={S.headerSub}>Collection summary &amp; export</Text>
+          </View>
+          <TouchableOpacity style={[S.exportBtn, exporting && { opacity: 0.6 }]}
+            onPress={handleExport} disabled={exporting}>
+            {exporting
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={S.exportTxt}>&#8595; Export PDF</Text>}
+          </TouchableOpacity>
+        </View>
+
+        {/* Summary hero */}
+        <View style={S.heroCard}>
+          <Text style={S.heroLabel}>Total Collected</Text>
+          <Text style={S.heroAmt}>{GHS(total)}</Text>
+          <Text style={S.heroSub}>{collections.length} transaction{collections.length !== 1 ? "s" : ""} · {rangeLabel}</Text>
+          <View style={S.breakdown}>
+            {Object.entries(byType).map(([k, v], i) => (
+              <React.Fragment key={k}>
+                {i > 0 && <View style={S.breakDiv} />}
+                <View style={S.breakItem}>
+                  <Text style={S.breakLabel}>{PT[k]?.label}</Text>
+                  <Text style={[S.breakVal, { color: PT[k]?.color || "#fff" }]}>{GHS(v)}</Text>
+                </View>
+              </React.Fragment>
+            ))}
+          </View>
         </View>
       </View>
 
-      {/* Period + Export */}
-      <View style={S.controlRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
-          {PERIODS.map(p => (
-            <TouchableOpacity key={p.key} style={[S.periodBtn, period === p.key && S.periodBtnActive]} onPress={() => setPeriod(p.key)}>
-              <Text style={[S.periodTxt, period === p.key && S.periodTxtActive]}>{p.label}</Text>
+      {/* Filter section */}
+      <View style={S.filterCard}>
+        <Text style={S.filterTitle}>Filter by Date Range</Text>
+
+        {/* Quick filters */}
+        <View style={S.quickRow}>
+          {QUICK.map(q => (
+            <TouchableOpacity key={q.key}
+              style={[S.quickBtn, activeQuick === q.key && S.quickBtnActive]}
+              onPress={() => handleQuick(q.key)}>
+              <Text style={[S.quickTxt, activeQuick === q.key && S.quickTxtActive]}>{q.label}</Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
-        <TouchableOpacity style={[S.exportBtn, exporting && { opacity: 0.6 }]} onPress={handleExport} disabled={exporting}>
-          <Text style={S.exportTxt}>{exporting ? '…' : '📤'}</Text>
+        </View>
+
+        {/* Date inputs */}
+        <View style={S.dateRow}>
+          <DateInput label="From" value={startDate} onChange={v => { setStartDate(v); setActiveQuick(null); }} placeholder="YYYY-MM-DD" />
+          <View style={S.dateSep}><Text style={S.dateSepTxt}>→</Text></View>
+          <DateInput label="To" value={endDate} onChange={v => { setEndDate(v); setActiveQuick(null); }} placeholder="YYYY-MM-DD" />
+        </View>
+
+        <TouchableOpacity style={S.searchBtn} onPress={handleSearch} activeOpacity={0.85}>
+          {loading
+            ? <ActivityIndicator color="#fff" size="small" />
+            : <Text style={S.searchBtnTxt}>&#128269;  Search Collections</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* Sign out */}
-      <TouchableOpacity style={S.signOutBtn} onPress={onLogout} activeOpacity={0.8}>
-        <Text style={S.signOutTxt}>Sign Out</Text>
-      </TouchableOpacity>
+      {/* Transactions */}
+      <View style={S.section}>
+        <View style={S.sectionHeader}>
+          <Text style={S.sectionTitle}>Transactions</Text>
+          {collections.length > 0 && (
+            <View style={S.countBadge}>
+              <Text style={S.countBadgeTxt}>{collections.length}</Text>
+            </View>
+          )}
+        </View>
 
-      {/* Collections list */}
-      <View style={S.listSection}>
-        <Text style={S.sectionTitle}>Transactions</Text>
         {loading ? (
-          <ActivityIndicator color={C.brand} style={{ marginTop: 24 }} />
+          <View style={S.loadingBox}>
+            <ActivityIndicator color={C.brand} size="large" />
+            <Text style={S.loadingTxt}>Loading collections...</Text>
+          </View>
         ) : collections.length === 0 ? (
           <View style={S.empty}>
-            <Text style={{ fontSize: 36, marginBottom: 10 }}>📋</Text>
-            <Text style={S.emptyTxt}>No collections in this period</Text>
-            <Text style={S.emptyHint}>Pull down to refresh</Text>
+            <View style={S.emptyIconBox}><Text style={{ fontSize: 32 }}>&#128203;</Text></View>
+            <Text style={S.emptyTxt}>No collections found</Text>
+            <Text style={S.emptyHint}>Try a different date range or pull to refresh</Text>
           </View>
-        ) : collections.map((c, i) => {
-          const pt  = c.payment_type || 'savings';
-          const ptc = PT[pt] || PT.savings;
-          return (
-            <View key={c.id || i} style={S.txnRow}>
-              <View style={[S.txnDot, { backgroundColor: ptc.bg }]}>
-                <Text style={{ fontSize: 14, color: ptc.color, fontWeight: '800' }}>↑</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={S.txnName} numberOfLines={1}>{c.customer_name || '—'}</Text>
-                <Text style={S.txnMeta}>{c.accounts?.account_number || '—'} · {fmtDateTime(c.created_at)}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={[S.txnAmt, { color: ptc.color }]}>{GHS(c.amount)}</Text>
-                <View style={[S.ptBadge, { backgroundColor: ptc.bg }]}>
-                  <Text style={[S.ptBadgeTxt, { color: ptc.color }]}>{ptc.label}</Text>
+        ) : (
+          <View style={S.txnList}>
+            {collections.map((c, i) => {
+              const pt  = c.payment_type || "savings";
+              const ptc = PT[pt] || PT.savings;
+              const isLast = i === collections.length - 1;
+              return (
+                <View key={c.id || i} style={[S.txnRow, isLast && { borderBottomWidth: 0 }]}>
+                  <View style={[S.txnIcon, { backgroundColor: ptc.bg }]}>
+                    <Text style={[S.txnIconTxt, { color: ptc.color }]}>
+                      {pt === "savings" ? "↑" : "↓"}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.txnName} numberOfLines={1}>{c.customer_name || "\u2014"}</Text>
+                    <Text style={S.txnMeta}>
+                      {c.accounts?.account_number || "\u2014"} · {fmtDateTime(c.created_at)}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={[S.txnAmt, { color: ptc.color }]}>{GHS(c.amount)}</Text>
+                    <View style={[S.badge, { backgroundColor: ptc.bg }]}>
+                      <Text style={[S.badgeTxt, { color: ptc.color }]}>{ptc.label}</Text>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            </View>
-          );
-        })}
+              );
+            })}
+          </View>
+        )}
       </View>
     </ScrollView>
   );
 }
 
+const DS = StyleSheet.create({
+  dateLabel:    { fontSize:11, fontWeight:"600", color:C.text3, textTransform:"uppercase", marginBottom:6 },
+  dateBox:      { flexDirection:"row", alignItems:"center", backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:10, paddingHorizontal:10, gap:6 },
+  dateBoxFocus: { borderColor:C.brand },
+  dateIcon:     { fontSize:14 },
+  dateInput:    { flex:1, paddingVertical:11, fontSize:13, color:C.text, fontWeight:"500" },
+});
+
 const S = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  hero: { margin: 16, borderRadius: 22, backgroundColor: C.brand, padding: 22, overflow: 'hidden', ...C.shadow },
-  heroDecor: { position: 'absolute', width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.07)', top: -60, right: -40 },
-  heroLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600', marginBottom: 6 },
-  heroAmt: { color: '#fff', fontSize: 34, fontWeight: '900', letterSpacing: -1, marginBottom: 4 },
-  heroSub: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginBottom: 18 },
-  heroStats: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 14, padding: 12 },
-  heroStat: { flex: 1, alignItems: 'center' },
-  heroStatDiv: { width: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
-  heroStatLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '600', marginBottom: 3 },
-  heroStatVal: { fontSize: 13, fontWeight: '800' },
-  controlRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8, gap: 8 },
-  periodBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: C.white, borderWidth: 1, borderColor: C.border },
-  periodBtnActive: { backgroundColor: C.brand, borderColor: C.brand },
-  periodTxt: { fontSize: 12, fontWeight: '600', color: C.text3 },
-  periodTxtActive: { color: '#fff' },
-  exportBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: C.white, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
-  exportTxt: { fontSize: 18 },
-  signOutBtn: { marginHorizontal: 16, marginBottom: 8, paddingVertical: 10, borderRadius: 12, backgroundColor: C.redLt, alignItems: 'center', borderWidth: 1, borderColor: C.redBg },
-  signOutTxt: { color: C.red, fontSize: 13, fontWeight: '700' },
-  listSection: { paddingHorizontal: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: C.text3, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
-  empty: { alignItems: 'center', paddingVertical: 40 },
-  emptyTxt: { fontSize: 15, fontWeight: '700', color: C.text3, marginBottom: 4 },
-  emptyHint: { fontSize: 12, color: C.text4 },
-  txnRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.borderLt, backgroundColor: C.white, paddingHorizontal: 14, borderRadius: 0 },
-  txnDot: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  txnName: { fontSize: 13, fontWeight: '600', color: C.text, marginBottom: 2 },
-  txnMeta: { fontSize: 11, color: C.text4 },
-  txnAmt: { fontSize: 14, fontWeight: '800', marginBottom: 3 },
-  ptBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  ptBadgeTxt: { fontSize: 10, fontWeight: '700' },
+  root:          { flex:1, backgroundColor:C.bg },
+
+  header:        { backgroundColor:C.bgDark, paddingHorizontal:20, paddingTop:18, paddingBottom:22 },
+  headerRow:     { flexDirection:"row", alignItems:"flex-start", justifyContent:"space-between", marginBottom:18 },
+  headerTitle:   { fontSize:20, fontWeight:"700", color:"#fff", marginBottom:2 },
+  headerSub:     { fontSize:12, color:"rgba(255,255,255,0.4)" },
+  exportBtn:     { backgroundColor:C.brand, paddingHorizontal:14, paddingVertical:9, borderRadius:10 },
+  exportTxt:     { color:"#fff", fontSize:13, fontWeight:"700" },
+
+  heroCard:      { backgroundColor:"rgba(255,255,255,0.06)", borderRadius:14, padding:16, borderWidth:1, borderColor:"rgba(255,255,255,0.07)" },
+  heroLabel:     { color:"rgba(255,255,255,0.4)", fontSize:10, textTransform:"uppercase", letterSpacing:0.5, marginBottom:4 },
+  heroAmt:       { color:"#fff", fontSize:32, fontWeight:"800", letterSpacing:-1, marginBottom:2 },
+  heroSub:       { color:"rgba(255,255,255,0.35)", fontSize:11, marginBottom:14 },
+  breakdown:     { flexDirection:"row", backgroundColor:"rgba(0,0,0,0.15)", borderRadius:10, padding:10 },
+  breakItem:     { flex:1, alignItems:"center" },
+  breakDiv:      { width:1, backgroundColor:"rgba(255,255,255,0.08)" },
+  breakLabel:    { color:"rgba(255,255,255,0.4)", fontSize:9, textTransform:"uppercase", marginBottom:3 },
+  breakVal:      { fontSize:12, fontWeight:"700" },
+
+  filterCard:    { backgroundColor:C.bgCard, marginHorizontal:16, marginTop:14, borderRadius:14, padding:16, borderWidth:1, borderColor:C.border },
+  filterTitle:   { fontSize:13, fontWeight:"700", color:C.text, marginBottom:12 },
+
+  quickRow:      { flexDirection:"row", gap:6, marginBottom:14, flexWrap:"wrap" },
+  quickBtn:      { paddingHorizontal:12, paddingVertical:7, borderRadius:8, backgroundColor:C.bg, borderWidth:1, borderColor:C.border },
+  quickBtnActive:{ backgroundColor:C.brand, borderColor:C.brand },
+  quickTxt:      { fontSize:12, fontWeight:"600", color:C.text3 },
+  quickTxtActive:{ color:"#fff" },
+
+  dateRow:       { flexDirection:"row", alignItems:"flex-end", gap:8, marginBottom:14 },
+  dateSep:       { paddingBottom:10, alignItems:"center" },
+  dateSepTxt:    { fontSize:16, color:C.text4 },
+
+  searchBtn:     { backgroundColor:C.bgDark, borderRadius:10, paddingVertical:14, alignItems:"center" },
+  searchBtnTxt:  { color:"#fff", fontSize:14, fontWeight:"700" },
+
+  section:       { paddingHorizontal:16, marginTop:16 },
+  sectionHeader: { flexDirection:"row", alignItems:"center", gap:8, marginBottom:10 },
+  sectionTitle:  { fontSize:11, fontWeight:"700", color:C.text4, textTransform:"uppercase", letterSpacing:0.6 },
+  countBadge:    { backgroundColor:C.brand, paddingHorizontal:7, paddingVertical:2, borderRadius:8 },
+  countBadgeTxt: { color:"#fff", fontSize:10, fontWeight:"700" },
+
+  loadingBox:    { alignItems:"center", paddingVertical:40, gap:10 },
+  loadingTxt:    { fontSize:12, color:C.text4 },
+
+  empty:         { alignItems:"center", paddingVertical:40 },
+  emptyIconBox:  { width:60, height:60, borderRadius:30, backgroundColor:"#F1F5F9", alignItems:"center", justifyContent:"center", marginBottom:12 },
+  emptyTxt:      { fontSize:14, fontWeight:"600", color:C.text3, marginBottom:4 },
+  emptyHint:     { fontSize:12, color:C.text4 },
+
+  txnList:       { backgroundColor:C.bgCard, borderRadius:14, overflow:"hidden", borderWidth:1, borderColor:C.border },
+  txnRow:        { flexDirection:"row", alignItems:"center", gap:10, paddingVertical:13, paddingHorizontal:14, borderBottomWidth:1, borderBottomColor:C.borderLt },
+  txnIcon:       { width:38, height:38, borderRadius:10, alignItems:"center", justifyContent:"center" },
+  txnIconTxt:    { fontSize:16, fontWeight:"700" },
+  txnName:       { fontSize:14, fontWeight:"600", color:C.text, marginBottom:2 },
+  txnMeta:       { fontSize:11, color:C.text4 },
+  txnAmt:        { fontSize:14, fontWeight:"700", marginBottom:2 },
+  badge:         { paddingHorizontal:7, paddingVertical:2, borderRadius:6 },
+  badgeTxt:      { fontSize:10, fontWeight:"600" },
 });
