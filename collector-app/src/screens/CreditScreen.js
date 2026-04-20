@@ -171,8 +171,13 @@ export default function CreditScreen({ collector }) {
         });
         if (te) throw new Error("Transaction failed: " + te.message);
 
+        // Verify the update by re-fetching the fresh outstanding
+        const { data: freshLoan } = await supabase.from("loans")
+          .select("outstanding").eq("id", loan.id).single();
+        const confirmedOut = freshLoan ? Number(freshLoan.outstanding) : newOut;
+
         msg = (custName || account.account_number) + "\nLoan repayment: " + GHS(amt) +
-          "\nOutstanding: " + GHS(newOut) +
+          "\nOutstanding: " + GHS(confirmedOut) +
           (newStatus === "completed" ? "\n\u2705 Loan fully paid!" : "");
       }
 
@@ -192,7 +197,8 @@ export default function CreditScreen({ collector }) {
 
         hpId = hp.id;
         const newPaid      = Number(hp.total_paid || 0) + amt;
-        const newRemaining = Math.max(0, Number(hp.total_price || 0) - newPaid);
+        // Use hp.remaining directly — it's the source of truth, not total_price - total_paid
+        const newRemaining = Math.max(0, Number(hp.remaining || 0) - amt);
         const newHPStatus  = newRemaining <= 0 ? "completed" : "active";
 
         const { error: he } = await supabase.from("hp_agreements").update({
@@ -259,8 +265,13 @@ export default function CreditScreen({ collector }) {
         });
         if (te) throw new Error("Transaction failed: " + te.message);
 
+        // Verify by re-fetching fresh remaining from DB
+        const { data: freshHP } = await supabase.from("hp_agreements")
+          .select("remaining").eq("id", hp.id).single();
+        const confirmedRemaining = freshHP ? Number(freshHP.remaining) : newRemaining;
+
         msg = (custName || account.account_number) + "\nHP payment: " + GHS(amt) +
-          "\nRemaining: " + GHS(newRemaining) +
+          "\nRemaining: " + GHS(confirmedRemaining) +
           (newHPStatus === "completed" ? "\n\u2705 HP fully paid!" : "");
       }
 
