@@ -34,6 +34,7 @@ import TellerReport from './pages/reports/TellerReport';
 import Settings from './pages/settings/Settings';
 import GeneralLedger from './pages/gl/GeneralLedger';
 import PendingApprovals from './pages/approvals/PendingApprovals';
+import AccessDenied from './pages/AccessDenied';
 import './styles/globals.css';
 
 // Maps route paths to permission module names (same as Sidebar MODULE_MAP)
@@ -87,11 +88,27 @@ function canAccessRoute(user, path) {
   return perms.includes(module);
 }
 
-function ProtectedRoute({ user, path, element }) {
+// Returns the first route path the user can access, or null if none
+function firstAccessiblePath(user) {
+  const ordered = [
+    '/dashboard', '/customers', '/accounts', '/transactions',
+    '/teller/session', '/loans', '/collections/record', '/collectors',
+    '/reports', '/gl', '/approvals', '/users', '/settings',
+  ];
+  return ordered.find(p => canAccessRoute(user, p)) || null;
+}
+
+function ProtectedRoute({ user, path, element, onLogout }) {
   if (!canAccessRoute(user, path)) {
-    return <Navigate to="/dashboard" replace />;
+    return <AccessDenied user={user} onLogout={onLogout} />;
   }
   return element;
+}
+
+// Root redirect: go to first accessible page, or access-denied
+function RootRedirect({ user }) {
+  const first = firstAccessiblePath(user);
+  return first ? <Navigate to={first} replace /> : <Navigate to="/access-denied" replace />;
 }
 
 function AppShell({ user, onLogout }) {
@@ -118,36 +135,37 @@ function AppContent({ user, onLogout }) {
           <TopBar user={user} onMenuClick={() => setSidebarOpen(p => !p)} />
           <main className="page-content">
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/customers" element={<ProtectedRoute user={user} path="/customers" element={<Customers />} />} />
-              <Route path="/customers/new" element={<ProtectedRoute user={user} path="/customers/new" element={<Customers />} />} />
-              <Route path="/customers/:id" element={<ProtectedRoute user={user} path="/customers" element={<CustomerDetail />} />} />
-              <Route path="/accounts" element={<ProtectedRoute user={user} path="/accounts" element={<Accounts />} />} />
-              <Route path="/accounts/open" element={<ProtectedRoute user={user} path="/accounts/open" element={<AccountOpening />} />} />
-              <Route path="/accounts/search" element={<ProtectedRoute user={user} path="/accounts/search" element={<AccountSearch />} />} />
-              <Route path="/accounts/360" element={<ProtectedRoute user={user} path="/accounts/360" element={<Account360 />} />} />
-              <Route path="/transactions" element={<ProtectedRoute user={user} path="/transactions" element={<TransactionHistory />} />} />
-              <Route path="/transactions/post" element={<ProtectedRoute user={user} path="/transactions/post" element={<PostTransaction />} />} />
-              <Route path="/transactions/statement" element={<ProtectedRoute user={user} path="/transactions/statement" element={<Statement />} />} />
-              <Route path="/transactions/approvals" element={<ProtectedRoute user={user} path="/transactions/approvals" element={<Approvals />} />} />
-              <Route path="/loans" element={<ProtectedRoute user={user} path="/loans" element={<Loans />} />} />
-              <Route path="/loans/apply" element={<ProtectedRoute user={user} path="/loans/apply" element={<LoanApplication />} />} />
-              <Route path="/loans/calculator" element={<ProtectedRoute user={user} path="/loans/calculator" element={<LoanCalculator />} />} />
-              <Route path="/hp/items" element={<ProtectedRoute user={user} path="/hp/items" element={<HPItems />} />} />
-              <Route path="/hp/agreements" element={<ProtectedRoute user={user} path="/hp/agreements" element={<HPAgreements />} />} />
-              <Route path="/collectors" element={<ProtectedRoute user={user} path="/collectors" element={<Collectors />} />} />
-              <Route path="/collections/record" element={<ProtectedRoute user={user} path="/collections/record" element={<RecordCollection />} />} />
-              <Route path="/collections/report" element={<ProtectedRoute user={user} path="/collections/report" element={<CollectionReport />} />} />
-              <Route path="/products" element={<ProtectedRoute user={user} path="/products" element={<BankProducts />} />} />
-              <Route path="/reports" element={<ProtectedRoute user={user} path="/reports" element={<Reports />} />} />
-              <Route path="/reports/teller" element={<ProtectedRoute user={user} path="/reports/teller" element={<TellerReport />} />} />
-              <Route path="/teller/session" element={<ProtectedRoute user={user} path="/teller/session" element={<TellerSession />} />} />
-              <Route path="/gl" element={<ProtectedRoute user={user} path="/gl" element={<GeneralLedger />} />} />
-              <Route path="/users" element={<ProtectedRoute user={user} path="/users" element={<UserManagement />} />} />
-              <Route path="/approvals" element={<ProtectedRoute user={user} path="/approvals" element={<PendingApprovals />} />} />
-              <Route path="/settings" element={<ProtectedRoute user={user} path="/settings" element={<Settings />} />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/" element={<RootRedirect user={user} />} />
+              <Route path="/dashboard" element={<ProtectedRoute user={user} path="/dashboard" element={<Dashboard />} onLogout={onLogout} />} />
+              <Route path="/customers" element={<ProtectedRoute user={user} path="/customers" element={<Customers />} onLogout={onLogout} />} />
+              <Route path="/customers/new" element={<ProtectedRoute user={user} path="/customers/new" element={<Customers />} onLogout={onLogout} />} />
+              <Route path="/customers/:id" element={<ProtectedRoute user={user} path="/customers" element={<CustomerDetail />} onLogout={onLogout} />} />
+              <Route path="/accounts" element={<ProtectedRoute user={user} path="/accounts" element={<Accounts />} onLogout={onLogout} />} />
+              <Route path="/accounts/open" element={<ProtectedRoute user={user} path="/accounts/open" element={<AccountOpening />} onLogout={onLogout} />} />
+              <Route path="/accounts/search" element={<ProtectedRoute user={user} path="/accounts/search" element={<AccountSearch />} onLogout={onLogout} />} />
+              <Route path="/accounts/360" element={<ProtectedRoute user={user} path="/accounts/360" element={<Account360 />} onLogout={onLogout} />} />
+              <Route path="/transactions" element={<ProtectedRoute user={user} path="/transactions" element={<TransactionHistory />} onLogout={onLogout} />} />
+              <Route path="/transactions/post" element={<ProtectedRoute user={user} path="/transactions/post" element={<PostTransaction />} onLogout={onLogout} />} />
+              <Route path="/transactions/statement" element={<ProtectedRoute user={user} path="/transactions/statement" element={<Statement />} onLogout={onLogout} />} />
+              <Route path="/transactions/approvals" element={<ProtectedRoute user={user} path="/transactions/approvals" element={<Approvals />} onLogout={onLogout} />} />
+              <Route path="/loans" element={<ProtectedRoute user={user} path="/loans" element={<Loans />} onLogout={onLogout} />} />
+              <Route path="/loans/apply" element={<ProtectedRoute user={user} path="/loans/apply" element={<LoanApplication />} onLogout={onLogout} />} />
+              <Route path="/loans/calculator" element={<ProtectedRoute user={user} path="/loans/calculator" element={<LoanCalculator />} onLogout={onLogout} />} />
+              <Route path="/hp/items" element={<ProtectedRoute user={user} path="/hp/items" element={<HPItems />} onLogout={onLogout} />} />
+              <Route path="/hp/agreements" element={<ProtectedRoute user={user} path="/hp/agreements" element={<HPAgreements />} onLogout={onLogout} />} />
+              <Route path="/collectors" element={<ProtectedRoute user={user} path="/collectors" element={<Collectors />} onLogout={onLogout} />} />
+              <Route path="/collections/record" element={<ProtectedRoute user={user} path="/collections/record" element={<RecordCollection />} onLogout={onLogout} />} />
+              <Route path="/collections/report" element={<ProtectedRoute user={user} path="/collections/report" element={<CollectionReport />} onLogout={onLogout} />} />
+              <Route path="/products" element={<ProtectedRoute user={user} path="/products" element={<BankProducts />} onLogout={onLogout} />} />
+              <Route path="/reports" element={<ProtectedRoute user={user} path="/reports" element={<Reports />} onLogout={onLogout} />} />
+              <Route path="/reports/teller" element={<ProtectedRoute user={user} path="/reports/teller" element={<TellerReport />} onLogout={onLogout} />} />
+              <Route path="/teller/session" element={<ProtectedRoute user={user} path="/teller/session" element={<TellerSession />} onLogout={onLogout} />} />
+              <Route path="/gl" element={<ProtectedRoute user={user} path="/gl" element={<GeneralLedger />} onLogout={onLogout} />} />
+              <Route path="/users" element={<ProtectedRoute user={user} path="/users" element={<UserManagement />} onLogout={onLogout} />} />
+              <Route path="/approvals" element={<ProtectedRoute user={user} path="/approvals" element={<PendingApprovals />} onLogout={onLogout} />} />
+              <Route path="/settings" element={<ProtectedRoute user={user} path="/settings" element={<Settings />} onLogout={onLogout} />} />
+              <Route path="/access-denied" element={<AccessDenied user={user} onLogout={onLogout} />} />
+              <Route path="*" element={<RootRedirect user={user} />} />
             </Routes>
           </main>
         </div>
