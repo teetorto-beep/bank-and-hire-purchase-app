@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { loadApprovalRules, saveApprovalRules, clearRulesCache, DEFAULT_RULES } from '../../core/approvalRules';
 import { exportFullDatabase } from '../../core/export';
-import { runBackup, listBackups, restoreBackup, exportBackupCSV, exportBackupExcel, exportBackupPDF, getNextDownloadDate, getLastDownloadDate } from '../../core/backup';
+import { runBackup, listBackups, restoreBackup, exportBackupCSV, exportBackupExcel, exportBackupPDF, getNextDownloadDate, getLastDownloadDate, getBackupIntervalMinutes, setBackupIntervalMinutes, getDownloadIntervalDays, setDownloadIntervalDays, startAutoBackup } from '../../core/backup';
 
 const TABLES = [
   { key: 'transactions',         label: 'Transactions',          desc: 'All posted transactions',        danger: true,  icon: '💳' },
@@ -83,6 +83,10 @@ export default function Settings() {
   const [restoreModal,    setRestoreModal]    = useState(null);
   const [lastBackup,      setLastBackup]      = useState(null);
   const [exportingId,     setExportingId]     = useState(null);
+  const [deletingBackup,  setDeletingBackup]  = useState(null);
+  const [backupMins,      setBackupMins]      = useState(() => getBackupIntervalMinutes());
+  const [downloadDays,    setDownloadDays]    = useState(() => getDownloadIntervalDays());
+  const [savingInterval,  setSavingInterval]  = useState(false);
 
   const loadCounts = async () => {
     setLoadingCounts(true);
@@ -324,6 +328,34 @@ export default function Settings() {
       if (format === 'pdf')   await exportBackupPDF(backup.id);
     } catch (e) { showMsg('Export failed: ' + e.message, 'error'); }
     setExportingId(null);
+  };
+
+  const handleDeleteBackup = async (backup) => {
+    setDeletingBackup(backup.id);
+    const { error } = await supabase.from('backups').delete().eq('id', backup.id);
+    if (error) {
+      showMsg('Delete failed: ' + error.message, 'error');
+    } else {
+      showMsg(`Backup "${backup.label}" deleted.`);
+      setBackups(prev => prev.filter(b => b.id !== backup.id));
+    }
+    setDeletingBackup(null);
+  };
+
+  const handleSaveIntervals = () => {
+    setSavingInterval(true);
+    const mins = Math.max(1, parseInt(backupMins) || 30);
+    const days = Math.max(1, parseInt(downloadDays) || 10);
+    setBackupIntervalMinutes(mins);
+    setDownloadIntervalDays(days);
+    setBackupMins(mins);
+    setDownloadDays(days);
+    // Restart auto-backup with new interval
+    startAutoBackup(user?.name || 'admin', (result) => {
+      if (result?.success) console.log(`[AutoBackup] ✅ ${result.label}`);
+    });
+    showMsg(`Backup interval set to every ${mins} minute${mins !== 1 ? 's' : ''}. Download every ${days} day${days !== 1 ? 's' : ''}.`);
+    setSavingInterval(false);
   };
 
   const updateRule = (key, field, value) => setRules(p => ({ ...p, [key]: { ...p[key], [field]: value } }));
@@ -664,7 +696,7 @@ export default function Settings() {
                     <span style={{ fontWeight:700, fontSize:13, color:'var(--brand)' }}>Auto-Backup (In-App)</span>
                   </div>
                   <div style={{ fontSize:12, color:'var(--text-3)', lineHeight:1.6 }}>
-                    Saves to database every <strong>30 minutes</strong> while logged in.<br/>
+                    Saves to database every <strong>{backupMins} minute{backupMins != 1 ? 's' : ''}</strong> while logged in.<br/>
                     {lastBackup && <>Last: <strong style={{ color:'var(--text)' }}>{lastBackup.label}</strong></>}
                   </div>
                 </div>
@@ -679,6 +711,59 @@ export default function Settings() {
                     Next: <strong style={{ color:'var(--text)' }}>{getNextDownloadDate()}</strong>
                   </div>
                 </div>
+              </div>
+
+              {/* Interval settings */}
+              <div style={{ padding:'16px 18px', background:'var(--surface)', borderRadius:12, border:'1px solid var(--border)' }}>
+                <div style={{ fontWeight:700, fontSize:13, color:'var(--text)', marginBottom:14, display:'flex', alignItems:'center', gap:8 }}>
+                  <Save size={15} style={{ color:'var(--brand)' }} />
+                  Backup Schedule Settings
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:14 }}>
+                  <div>
+                    <label style={{ fontSize:11, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.05em', display:'block', marginBottom:6 }}>
+                      Auto-Backup Interval (minutes)
+                    </label>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <input
+                        type="number" min="1" max="1440"
+                        className="form-control"
+                        value={backupMins}
+                        onChange={e => setBackupMins(e.target.value)}
+                        style={{ width:100, fontWeight:700, fontSize:15, textAlign:'center' }}
+                      />
+                      <span style={{ fontSize:12, color:'var(--text-3)' }}>
+                        {backupMins >= 60
+                          ? `= ${(backupMins / 60).toFixed(1)} hour${backupMins >= 120 ? 's' : ''}`
+                          : `minute${backupMins != 1 ? 's' : ''}`}
+                      </span>
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--text-4)', marginTop:4 }}>
+                      Suggested: 15, 30, 60, 120 minutes
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:11, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.05em', display:'block', marginBottom:6 }}>
+                      Auto-Download Interval (days)
+                    </label>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <input
+                        type="number" min="1" max="365"
+                        className="form-control"
+                        value={downloadDays}
+                        onChange={e => setDownloadDays(e.target.value)}
+                        style={{ width:100, fontWeight:700, fontSize:15, textAlign:'center' }}
+                      />
+                      <span style={{ fontSize:12, color:'var(--text-3)' }}>day{downloadDays != 1 ? 's' : ''}</span>
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--text-4)', marginTop:4 }}>
+                      Suggested: 1, 7, 10, 30 days
+                    </div>
+                  </div>
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={handleSaveIntervals} disabled={savingInterval}>
+                  <Save size={13} />{savingInterval ? 'Saving…' : 'Save Schedule'}
+                </button>
               </div>
 
               {/* Action buttons */}
@@ -722,6 +807,7 @@ export default function Settings() {
                           <th style={{ textAlign:'right' }}>Rows</th>
                           <th style={{ textAlign:'center', width:260 }}>Export</th>
                           <th style={{ width:100 }}>Restore</th>
+                          <th style={{ width:70 }}>Delete</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -779,6 +865,22 @@ export default function Settings() {
                                 style={{ whiteSpace:'nowrap', fontSize:11 }}>
                                 <RotateCcw size={11} />
                                 {restoring === b.id ? 'Restoring…' : 'Restore'}
+                              </button>
+                            </td>
+                            <td>
+                              <button
+                                className="btn btn-danger btn-sm btn-icon"
+                                title="Delete this backup"
+                                onClick={() => {
+                                  if (window.confirm(`Delete backup "${b.label}"? This cannot be undone.`)) {
+                                    handleDeleteBackup(b);
+                                  }
+                                }}
+                                disabled={deletingBackup === b.id}
+                                style={{ fontSize:11 }}>
+                                {deletingBackup === b.id
+                                  ? '…'
+                                  : <Trash2 size={13} />}
                               </button>
                             </td>
                           </tr>

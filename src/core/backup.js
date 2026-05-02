@@ -16,10 +16,27 @@ const BACKUP_TABLES = [
   'gl_accounts', 'gl_entries', 'audit_log', 'deduction_rules',
 ];
 
-const INTERVAL_MS        = 30 * 60 * 1000;  // 30 minutes (in-app backup)
-const AUTO_DOWNLOAD_DAYS = 10;               // auto-download every 10 days
-const MAX_BACKUPS        = 48;              // keep last 48 in DB
-const LAST_DOWNLOAD_KEY  = 'last_backup_download';
+const DEFAULT_INTERVAL_MIN  = 30;            // default 30 minutes
+const AUTO_DOWNLOAD_DAYS    = 10;            // auto-download every 10 days
+const MAX_BACKUPS           = 48;            // keep last 48 in DB
+const INTERVAL_KEY          = 'backup_interval_minutes';
+const DOWNLOAD_INTERVAL_KEY = 'backup_download_days';
+
+// ── Get/set interval from localStorage ───────────────────────────────────────
+export function getBackupIntervalMinutes() {
+  return parseInt(localStorage.getItem(INTERVAL_KEY) || DEFAULT_INTERVAL_MIN);
+}
+export function setBackupIntervalMinutes(mins) {
+  localStorage.setItem(INTERVAL_KEY, String(Math.max(1, parseInt(mins) || DEFAULT_INTERVAL_MIN)));
+}
+export function getDownloadIntervalDays() {
+  return parseInt(localStorage.getItem(DOWNLOAD_INTERVAL_KEY) || AUTO_DOWNLOAD_DAYS);
+}
+export function setDownloadIntervalDays(days) {
+  localStorage.setItem(DOWNLOAD_INTERVAL_KEY, String(Math.max(1, parseInt(days) || AUTO_DOWNLOAD_DAYS)));
+}
+
+const LAST_DOWNLOAD_KEY = 'last_backup_download';
 
 let _timer = null;
 
@@ -61,8 +78,8 @@ export async function runBackup(userName = 'system') {
       await supabase.from('backups').delete().in('id', toDelete);
     }
 
-    // Check if auto-download is due (every 10 days)
-    await checkAutoDownload(snapshot, label, userName);
+    // Check if auto-download is due
+    await checkAutoDownload(snapshot, label);
 
     console.log(`[Backup] ✅ ${label} — ${totalRows} rows`);
     return { success: true, label, totalRows };
@@ -72,16 +89,17 @@ export async function runBackup(userName = 'system') {
   }
 }
 
-// ── Check if 10-day auto-download is due ─────────────────────────────────────
-async function checkAutoDownload(snapshot, label, userName) {
+// ── Check if auto-download is due ────────────────────────────────────────────
+async function checkAutoDownload(snapshot, label) {
   try {
-    const last = localStorage.getItem(LAST_DOWNLOAD_KEY);
-    const now  = Date.now();
-    const due  = !last || (now - parseInt(last)) >= AUTO_DOWNLOAD_DAYS * 24 * 60 * 60 * 1000;
+    const last    = localStorage.getItem(LAST_DOWNLOAD_KEY);
+    const now     = Date.now();
+    const days    = getDownloadIntervalDays();
+    const due     = !last || (now - parseInt(last)) >= days * 24 * 60 * 60 * 1000;
     if (due) {
       await downloadBackupAsZip(snapshot, label);
       localStorage.setItem(LAST_DOWNLOAD_KEY, String(now));
-      console.log('[Backup] 📥 Auto-download triggered (10-day schedule)');
+      console.log(`[Backup] 📥 Auto-download triggered (every ${days} days)`);
     }
   } catch (e) {
     console.warn('[Backup] Auto-download failed:', e.message);
@@ -92,11 +110,12 @@ async function checkAutoDownload(snapshot, label, userName) {
 export function startAutoBackup(userName = 'system', onComplete = null) {
   stopAutoBackup();
   runBackup(userName).then(r => onComplete?.(r));
+  const mins = getBackupIntervalMinutes();
   _timer = setInterval(async () => {
     const r = await runBackup(userName);
     onComplete?.(r);
-  }, INTERVAL_MS);
-  console.log('[Backup] Auto-backup started — every 30 min, auto-download every 10 days');
+  }, mins * 60 * 1000);
+  console.log(`[Backup] Auto-backup started — every ${mins} min, auto-download every ${getDownloadIntervalDays()} days`);
 }
 
 export function stopAutoBackup() {
@@ -157,7 +176,8 @@ export async function listBackups() {
 export function getNextDownloadDate() {
   const last = localStorage.getItem(LAST_DOWNLOAD_KEY);
   if (!last) return 'On next backup';
-  const next = new Date(parseInt(last) + AUTO_DOWNLOAD_DAYS * 24 * 60 * 60 * 1000);
+  const days = getDownloadIntervalDays();
+  const next = new Date(parseInt(last) + days * 24 * 60 * 60 * 1000);
   return next.toLocaleDateString('en-GH', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
