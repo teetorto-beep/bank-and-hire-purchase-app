@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { loadApprovalRules, saveApprovalRules, clearRulesCache, DEFAULT_RULES } from '../../core/approvalRules';
 import { exportFullDatabase } from '../../core/export';
-import { supabase } from '../../core/supabase';
 import { runBackup, listBackups, restoreBackup } from '../../core/backup';
 
 const TABLES = [
@@ -68,9 +67,10 @@ export default function Settings() {
   // Clear-all state
   const [clearAllModal,   setClearAllModal]   = useState(false);
   const [clearAllPass,    setClearAllPass]    = useState('');
-  const [clearAllStep,    setClearAllStep]    = useState(1); // 1=password, 2=confirm
+  const [clearAllStep,    setClearAllStep]    = useState(1);
   const [clearingAll,     setClearingAll]     = useState(false);
   const [clearAllError,   setClearAllError]   = useState('');
+  const [showClearPass,   setShowClearPass]   = useState(false);
   // Download all state
   const [downloading,     setDownloading]     = useState(false);
   // Backup state
@@ -148,10 +148,22 @@ export default function Settings() {
   };
 
   // ── Clear ALL data with password gate ────────────────────────────────────────
-  const CLEAR_ALL_PASSWORD = 'MAJUPAT-RESET-2024';
+  // Uses the current admin's own login password for verification
+  const [showClearPass,     setShowClearPass]     = useState(false);
 
-  const handleClearAllVerify = () => {
-    if (clearAllPass.trim() !== CLEAR_ALL_PASSWORD) {
+  const handleClearAllVerify = async () => {
+    if (!clearAllPass.trim()) {
+      setClearAllError('Please enter your password.');
+      return;
+    }
+    // Verify against the admin's actual password in the database
+    const { data, error } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user?.id)
+      .eq('password', clearAllPass.trim())
+      .single();
+    if (error || !data) {
       setClearAllError('Incorrect password. Please try again.');
       return;
     }
@@ -907,7 +919,7 @@ export default function Settings() {
           clearAllStep === 1 ? (
             <>
               <button className="btn btn-secondary" onClick={closeClearAll}>Cancel</button>
-              <button className="btn btn-danger" onClick={handleClearAllVerify}>
+              <button className="btn btn-danger" onClick={() => handleClearAllVerify()}>
                 <Lock size={14} /> Verify Password
               </button>
             </>
@@ -933,18 +945,29 @@ export default function Settings() {
             </div>
             <div>
               <label style={{ fontSize:12, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.06em', display:'block', marginBottom:8 }}>
-                Admin Password
+                Your Admin Password
               </label>
-              <input
-                type="password"
-                className="form-control"
-                placeholder="Enter admin password to continue…"
-                value={clearAllPass}
-                onChange={e => { setClearAllPass(e.target.value); setClearAllError(''); }}
-                onKeyDown={e => e.key === 'Enter' && handleClearAllVerify()}
-                autoFocus
-                style={{ fontSize:15 }}
-              />
+              <div style={{ position:'relative' }}>
+                <input
+                  type={showClearPass ? 'text' : 'password'}
+                  className="form-control"
+                  placeholder="Enter your login password…"
+                  value={clearAllPass}
+                  onChange={e => { setClearAllPass(e.target.value); setClearAllError(''); }}
+                  onKeyDown={e => e.key === 'Enter' && handleClearAllVerify()}
+                  autoFocus
+                  style={{ fontSize:15, paddingRight:60 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowClearPass(v => !v)}
+                  style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', fontSize:13, color:'var(--text-3)', fontWeight:600 }}>
+                  {showClearPass ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <div style={{ marginTop:6, fontSize:12, color:'var(--text-3)' }}>
+                Use your admin login password — the same one you use to sign in.
+              </div>
               {clearAllError && (
                 <div style={{ marginTop:8, fontSize:13, color:'var(--red)', display:'flex', alignItems:'center', gap:6 }}>
                   <AlertTriangle size={13} /> {clearAllError}
