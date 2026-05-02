@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { loadApprovalRules, saveApprovalRules, clearRulesCache, DEFAULT_RULES } from '../../core/approvalRules';
 import { exportFullDatabase } from '../../core/export';
-import { runBackup, listBackups, restoreBackup } from '../../core/backup';
+import { runBackup, listBackups, restoreBackup, exportBackupCSV, exportBackupExcel, exportBackupPDF, getNextDownloadDate, getLastDownloadDate } from '../../core/backup';
 
 const TABLES = [
   { key: 'transactions',         label: 'Transactions',          desc: 'All posted transactions',        danger: true,  icon: '💳' },
@@ -80,6 +80,7 @@ export default function Settings() {
   const [restoring,       setRestoring]       = useState(null);
   const [restoreModal,    setRestoreModal]    = useState(null);
   const [lastBackup,      setLastBackup]      = useState(null);
+  const [exportingId,     setExportingId]     = useState(null);
 
   const loadCounts = async () => {
     setLoadingCounts(true);
@@ -311,6 +312,16 @@ export default function Settings() {
     }
     setRestoreModal(null);
     setRestoring(null);
+  };
+
+  const handleExport = async (backup, format) => {
+    setExportingId(backup.id + format);
+    try {
+      if (format === 'csv')   await exportBackupCSV(backup.id);
+      if (format === 'excel') await exportBackupExcel(backup.id);
+      if (format === 'pdf')   await exportBackupPDF(backup.id);
+    } catch (e) { showMsg('Export failed: ' + e.message, 'error'); }
+    setExportingId(null);
   };
 
   const updateRule = (key, field, value) => setRules(p => ({ ...p, [key]: { ...p[key], [field]: value } }));
@@ -643,73 +654,128 @@ export default function Settings() {
           {tab === 'backup' && isAdmin && (
             <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
 
-              {/* Status card */}
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 20px', background:'var(--surface)', borderRadius:12, border:'2px solid var(--brand)' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-                  <div style={{ width:44, height:44, borderRadius:12, background:'var(--blue-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                    <Archive size={20} style={{ color:'var(--brand)' }} />
+              {/* Status cards */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                <div style={{ padding:'16px 18px', background:'var(--surface)', borderRadius:12, border:'2px solid var(--brand)' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                    <Archive size={18} style={{ color:'var(--brand)' }} />
+                    <span style={{ fontWeight:700, fontSize:13, color:'var(--brand)' }}>Auto-Backup (In-App)</span>
                   </div>
-                  <div>
-                    <div style={{ fontWeight:800, fontSize:15, color:'var(--text)', marginBottom:3 }}>Auto-Backup Active</div>
-                    <div style={{ fontSize:12, color:'var(--text-3)' }}>
-                      Runs every <strong>30 minutes</strong> automatically while you are logged in.
-                      {lastBackup && <> Last backup: <strong style={{ color:'var(--brand)' }}>{lastBackup.label}</strong> — {lastBackup.size_rows?.toLocaleString()} rows</>}
-                    </div>
+                  <div style={{ fontSize:12, color:'var(--text-3)', lineHeight:1.6 }}>
+                    Saves to database every <strong>30 minutes</strong> while logged in.<br/>
+                    {lastBackup && <>Last: <strong style={{ color:'var(--text)' }}>{lastBackup.label}</strong></>}
                   </div>
                 </div>
-                <button className="btn btn-primary" onClick={handleManualBackup} disabled={backingUp} style={{ whiteSpace:'nowrap', marginLeft:16 }}>
+                <div style={{ padding:'16px 18px', background:'var(--surface)', borderRadius:12, border:'2px solid var(--green)' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                    <Download size={18} style={{ color:'var(--green)' }} />
+                    <span style={{ fontWeight:700, fontSize:13, color:'var(--green)' }}>Auto-Download (Every 10 Days)</span>
+                  </div>
+                  <div style={{ fontSize:12, color:'var(--text-3)', lineHeight:1.6 }}>
+                    Downloads ZIP to your computer automatically.<br/>
+                    Last download: <strong style={{ color:'var(--text)' }}>{getLastDownloadDate()}</strong><br/>
+                    Next: <strong style={{ color:'var(--text)' }}>{getNextDownloadDate()}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display:'flex', gap:10 }}>
+                <button className="btn btn-primary" onClick={handleManualBackup} disabled={backingUp}>
                   <Archive size={14} />{backingUp ? 'Backing up…' : 'Backup Now'}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={loadBackupList} disabled={loadingBackups}>
+                  <RefreshCw size={13} className={loadingBackups ? 'spin' : ''} />Refresh List
                 </button>
               </div>
 
               {/* Backup list */}
               <div className="card" style={{ padding:0, overflow:'hidden' }}>
-                <div style={{ padding:'14px 18px', background:'var(--surface-2)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <div style={{ padding:'12px 16px', background:'var(--surface-2)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                     <Archive size={14} style={{ color:'var(--brand)' }} />
                     <span style={{ fontWeight:700, fontSize:13 }}>Saved Backups</span>
-                    <span style={{ fontSize:12, color:'var(--text-3)' }}>— last 48 kept (24 hours)</span>
+                    <span style={{ fontSize:11, color:'var(--text-3)', background:'var(--surface)', padding:'2px 8px', borderRadius:10, border:'1px solid var(--border)' }}>
+                      {backups.length} saved · last 48 kept
+                    </span>
                   </div>
-                  <button className="btn btn-secondary btn-sm" onClick={loadBackupList} disabled={loadingBackups}>
-                    <RefreshCw size={13} className={loadingBackups ? 'spin' : ''} />Refresh
-                  </button>
                 </div>
 
                 {loadingBackups ? (
                   <div style={{ padding:32, textAlign:'center', color:'var(--text-3)' }}>Loading backups…</div>
                 ) : backups.length === 0 ? (
-                  <div style={{ padding:32, textAlign:'center', color:'var(--text-3)' }}>
-                    <Archive size={32} style={{ opacity:0.3, marginBottom:8 }} />
-                    <div>No backups yet. Click "Backup Now" to create one.</div>
+                  <div style={{ padding:40, textAlign:'center', color:'var(--text-3)' }}>
+                    <Archive size={36} style={{ opacity:0.25, marginBottom:10, display:'block', margin:'0 auto 10px' }} />
+                    <div style={{ fontWeight:600, marginBottom:4 }}>No backups yet</div>
+                    <div style={{ fontSize:12 }}>Click "Backup Now" to create the first backup.</div>
                   </div>
                 ) : (
                   <div className="table-wrap">
                     <table>
                       <thead>
                         <tr>
-                          <th>#</th>
-                          <th>Date & Time</th>
+                          <th style={{ width:60 }}>#</th>
+                          <th>Date &amp; Time</th>
                           <th>Created By</th>
                           <th style={{ textAlign:'right' }}>Rows</th>
-                          <th>Actions</th>
+                          <th style={{ textAlign:'center', width:260 }}>Export</th>
+                          <th style={{ width:100 }}>Restore</th>
                         </tr>
                       </thead>
                       <tbody>
                         {backups.map((b, i) => (
                           <tr key={b.id} style={{ background: i === 0 ? 'var(--blue-bg)' : undefined }}>
-                            <td style={{ fontSize:12, color:'var(--text-3)', fontWeight:600 }}>
-                              {i === 0 ? <span style={{ color:'var(--brand)', fontWeight:800 }}>Latest</span> : `#${backups.length - i}`}
+                            <td style={{ fontSize:11, color:'var(--text-3)', fontWeight:700 }}>
+                              {i === 0
+                                ? <span style={{ color:'var(--brand)', fontSize:10, background:'var(--blue-bg)', padding:'2px 8px', borderRadius:10, border:'1px solid var(--brand)', fontWeight:800 }}>LATEST</span>
+                                : `#${backups.length - i}`}
                             </td>
                             <td style={{ fontWeight:600, fontSize:13 }}>{b.label}</td>
                             <td style={{ fontSize:12, color:'var(--text-3)' }}>{b.created_by || '—'}</td>
-                            <td style={{ textAlign:'right', fontWeight:700, fontFamily:'monospace' }}>{(b.size_rows || 0).toLocaleString()}</td>
+                            <td style={{ textAlign:'right', fontWeight:700, fontFamily:'monospace', fontSize:13 }}>
+                              {(b.size_rows || 0).toLocaleString()}
+                            </td>
+                            <td>
+                              <div style={{ display:'flex', gap:6, justifyContent:'center' }}>
+                                {/* CSV */}
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  title="Download as CSV (ZIP)"
+                                  onClick={() => handleExport(b, 'csv')}
+                                  disabled={exportingId === b.id + 'csv'}
+                                  style={{ fontSize:11, padding:'4px 10px' }}>
+                                  <Download size={11} />
+                                  {exportingId === b.id + 'csv' ? '…' : 'CSV'}
+                                </button>
+                                {/* Excel */}
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  title="Download as Excel (.xlsx)"
+                                  onClick={() => handleExport(b, 'excel')}
+                                  disabled={exportingId === b.id + 'excel'}
+                                  style={{ fontSize:11, padding:'4px 10px', color:'#16a34a', borderColor:'#16a34a' }}>
+                                  <Download size={11} />
+                                  {exportingId === b.id + 'excel' ? '…' : 'Excel'}
+                                </button>
+                                {/* PDF */}
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  title="Download summary as PDF"
+                                  onClick={() => handleExport(b, 'pdf')}
+                                  disabled={exportingId === b.id + 'pdf'}
+                                  style={{ fontSize:11, padding:'4px 10px', color:'#dc2626', borderColor:'#dc2626' }}>
+                                  <Download size={11} />
+                                  {exportingId === b.id + 'pdf' ? '…' : 'PDF'}
+                                </button>
+                              </div>
+                            </td>
                             <td>
                               <button
                                 className="btn btn-secondary btn-sm"
                                 onClick={() => setRestoreModal(b)}
                                 disabled={!!restoring}
-                                style={{ whiteSpace:'nowrap' }}>
-                                <RotateCcw size={12} />
+                                style={{ whiteSpace:'nowrap', fontSize:11 }}>
+                                <RotateCcw size={11} />
                                 {restoring === b.id ? 'Restoring…' : 'Restore'}
                               </button>
                             </td>
