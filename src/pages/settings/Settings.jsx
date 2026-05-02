@@ -149,7 +149,6 @@ export default function Settings() {
 
   // ── Clear ALL data with password gate ────────────────────────────────────────
   // Uses the current admin's own login password for verification
-  const [showClearPass,     setShowClearPass]     = useState(false);
 
   const handleClearAllVerify = async () => {
     if (!clearAllPass.trim()) {
