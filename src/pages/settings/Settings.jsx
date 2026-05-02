@@ -19,6 +19,8 @@ const TABLES = [
   { key: 'loans',                label: 'Loans',                 desc: 'All loan records',               danger: true,  icon: '🏦' },
   { key: 'accounts',             label: 'Accounts',              desc: 'All customer accounts',          danger: true,  icon: '🏧' },
   { key: 'customers',            label: 'Customers',             desc: 'All customer records',           danger: true,  icon: '👥' },
+  { key: 'hp_items',             label: 'HP Items',              desc: 'Hire purchase item catalogue',   danger: true,  icon: '📦' },
+  { key: 'products',             label: 'Products',              desc: 'Bank product catalogue',         danger: true,  icon: '🏷️' },
   { key: 'gl_entries',           label: 'GL Entries',            desc: 'General ledger journal entries', danger: true,  icon: '📒' },
   { key: 'gl_accounts',          label: 'GL Accounts',           desc: 'Chart of accounts',              danger: true,  icon: '📊' },
   { key: 'collections',          label: 'Collections',           desc: 'Field collection records',       danger: false, icon: '💰' },
