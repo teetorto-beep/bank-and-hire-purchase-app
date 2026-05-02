@@ -11,6 +11,7 @@ import {
   normPendingTxn, normPendingApproval,
 } from '../core/normalize';
 import { supabase } from '../core/supabase';
+import { startAutoBackup, stopAutoBackup } from '../core/backup';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -104,6 +105,19 @@ export function AppProvider({ children }) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [silentRefresh]);
+
+  // ── Auto-backup every 30 minutes (admin only) ─────────────────────────────
+  useEffect(() => {
+    const currentUser = authDB.currentUser();
+    if (currentUser?.role === 'admin' || currentUser?.role === 'manager') {
+      startAutoBackup(currentUser.name, (result) => {
+        if (result?.success) {
+          console.log(`[AutoBackup] ✅ ${result.label} — ${result.totalRows} rows`);
+        }
+      });
+    }
+    return () => stopAutoBackup();
+  }, []);
 
   // ── Supabase Realtime — auto-update state on any DB change ────────────────
   useEffect(() => {

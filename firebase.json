@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "banking-app-a6b8a",
+    "site": "mujapatbanking",
     "public": "build",
     "ignore": [
       "firebase.json",

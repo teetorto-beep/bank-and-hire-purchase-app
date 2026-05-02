@@ -6,18 +6,23 @@ import {
   Shield, Trash2, AlertTriangle, CheckCircle, Save, Info,
   Database, Settings as SettingsIcon, ChevronRight, ToggleLeft,
   ToggleRight, DollarSign, Users, Lock, Server, Activity,
-  RefreshCw, Package, FileText, Layers,
+  RefreshCw, Package, FileText, Layers, Download, Archive, RotateCcw,
 } from 'lucide-react';
 import { loadApprovalRules, saveApprovalRules, clearRulesCache, DEFAULT_RULES } from '../../core/approvalRules';
+import { exportFullDatabase } from '../../core/export';
+import { supabase } from '../../core/supabase';
+import { runBackup, listBackups, restoreBackup } from '../../core/backup';
 
 const TABLES = [
   { key: 'transactions',         label: 'Transactions',          desc: 'All posted transactions',        danger: true,  icon: '💳' },
   { key: 'hp_payments',          label: 'HP Payments',           desc: 'Hire purchase payment records',  danger: true,  icon: '🛍️' },
   { key: 'hp_agreements',        label: 'HP Agreements',         desc: 'All HP agreements',              danger: true,  icon: '📄' },
-  { key: 'collections',          label: 'Collections',           desc: 'Field collection records',       danger: false, icon: '💰' },
   { key: 'loans',                label: 'Loans',                 desc: 'All loan records',               danger: true,  icon: '🏦' },
   { key: 'accounts',             label: 'Accounts',              desc: 'All customer accounts',          danger: true,  icon: '🏧' },
   { key: 'customers',            label: 'Customers',             desc: 'All customer records',           danger: true,  icon: '👥' },
+  { key: 'gl_entries',           label: 'GL Entries',            desc: 'General ledger journal entries', danger: true,  icon: '📒' },
+  { key: 'gl_accounts',          label: 'GL Accounts',           desc: 'Chart of accounts',              danger: true,  icon: '📊' },
+  { key: 'collections',          label: 'Collections',           desc: 'Field collection records',       danger: false, icon: '💰' },
   { key: 'pending_transactions', label: 'Pending Transactions',  desc: 'Approval queue',                 danger: false, icon: '⏳' },
   { key: 'audit_log',            label: 'Audit Log',             desc: 'System audit trail',             danger: false, icon: '📋' },
 ];
@@ -43,6 +48,7 @@ const GHS = n => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFracti
 const TABS = [
   { key: 'system',   label: 'System Info',      icon: Info,          desc: 'App & database info' },
   { key: 'approval', label: 'Approval Rules',   icon: Shield,        desc: 'Configure approval workflows' },
+  { key: 'backup',   label: 'Backups',          icon: Archive,       desc: 'Auto-backup & restore', adminOnly: true },
   { key: 'data',     label: 'Data Management',  icon: Database,      desc: 'Clear & manage data', adminOnly: true },
 ];
 
@@ -53,12 +59,27 @@ export default function Settings() {
   const [tab,          setTab]          = useState('system');
   const [msg,          setMsg]          = useState('');
   const [msgType,      setMsgType]      = useState('success');
-  const [confirmClear, setConfirmClear] = useState(null);
-  const [clearing,     setClearing]     = useState(false);
-  const [tableCounts,  setTableCounts]  = useState({});
-  const [loadingCounts,setLoadingCounts]= useState(false);
-  const [rules,        setRules]        = useState(DEFAULT_RULES);
-  const [savingRules,  setSavingRules]  = useState(false);
+  const [confirmClear,    setConfirmClear]    = useState(null);
+  const [clearing,        setClearing]        = useState(false);
+  const [tableCounts,     setTableCounts]     = useState({});
+  const [loadingCounts,   setLoadingCounts]   = useState(false);
+  const [rules,           setRules]           = useState(DEFAULT_RULES);
+  const [savingRules,     setSavingRules]     = useState(false);
+  // Clear-all state
+  const [clearAllModal,   setClearAllModal]   = useState(false);
+  const [clearAllPass,    setClearAllPass]    = useState('');
+  const [clearAllStep,    setClearAllStep]    = useState(1); // 1=password, 2=confirm
+  const [clearingAll,     setClearingAll]     = useState(false);
+  const [clearAllError,   setClearAllError]   = useState('');
+  // Download all state
+  const [downloading,     setDownloading]     = useState(false);
+  // Backup state
+  const [backups,         setBackups]         = useState([]);
+  const [loadingBackups,  setLoadingBackups]  = useState(false);
+  const [backingUp,       setBackingUp]       = useState(false);
+  const [restoring,       setRestoring]       = useState(null);
+  const [restoreModal,    setRestoreModal]    = useState(null);
+  const [lastBackup,      setLastBackup]      = useState(null);
 
   const loadCounts = async () => {
     setLoadingCounts(true);
@@ -71,8 +92,16 @@ export default function Settings() {
     setLoadingCounts(false);
   };
 
+  const loadBackupList = async () => {
+    setLoadingBackups(true);
+    const { data } = await listBackups();
+    setBackups(data || []);
+    if (data?.length) setLastBackup(data[0]);
+    setLoadingBackups(false);
+  };
+
   useEffect(() => {
-    if (isAdmin) loadCounts();
+    if (isAdmin) { loadCounts(); loadBackupList(); }
     loadApprovalRules().then(setRules);
   }, [isAdmin]);
 
@@ -85,11 +114,192 @@ export default function Settings() {
     if (!confirmClear) return;
     setClearing(true);
     try {
-      const { error } = await supabase.from(confirmClear.key).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const { error } = await supabase
+        .from(confirmClear.key)
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
       if (error) showMsg(`Failed: ${error.message}`, 'error');
-      else { showMsg(`${confirmClear.label} cleared.`); setTableCounts(p => ({ ...p, [confirmClear.key]: 0 })); }
+      else {
+        showMsg(`${confirmClear.label} cleared.`);
+        setTableCounts(p => ({ ...p, [confirmClear.key]: 0 }));
+        // Re-seed GL accounts if they were cleared
+        if (confirmClear.key === 'gl_accounts') {
+          const glAccounts = [
+            { code:'1000', name:'Cash in Hand',              type:'asset',    category:'current_asset',     description:'Physical cash in vault',      is_system:true },
+            { code:'1010', name:'Main Operating Account',    type:'asset',    category:'current_asset',     description:'Primary bank account',        is_system:true },
+            { code:'1020', name:'Customer Deposits Account', type:'asset',    category:'current_asset',     description:'Held customer deposits',      is_system:true },
+            { code:'1030', name:'Savings Pool Account',      type:'asset',    category:'current_asset',     description:'Pooled savings funds',        is_system:true },
+            { code:'1100', name:'Loan Receivables',          type:'asset',    category:'current_asset',     description:'Outstanding loans',           is_system:true },
+            { code:'2000', name:'Current Accounts',          type:'liability',category:'current_liability', description:'Customer demand deposits',    is_system:true },
+            { code:'2010', name:'Savings Accounts',          type:'liability',category:'current_liability', description:'Interest-bearing deposits',   is_system:true },
+            { code:'3000', name:'Share Capital',             type:'equity',   category:'equity',            description:'Owner investments',           is_system:true },
+            { code:'3010', name:'Retained Earnings',         type:'equity',   category:'equity',            description:'Accumulated profits',         is_system:true },
+            { code:'4000', name:'Loan Interest Income',      type:'revenue',  category:'interest_income',   description:'Interest from loans',         is_system:true },
+            { code:'5000', name:'Interest on Savings',       type:'expense',  category:'interest_expense',  description:'Paid to savings customers',   is_system:true },
+            { code:'5100', name:'Employee Salaries',         type:'expense',  category:'operating_expense', description:'Staff compensation',          is_system:true },
+            { code:'5200', name:'Loan Loss Provision',       type:'expense',  category:'provision',         description:'Expected loan defaults',      is_system:true },
+          ];
+          await supabase.from('gl_accounts').upsert(glAccounts, { onConflict:'code' });
+          await loadCounts();
+        }
+      }
     } catch (e) { showMsg(e.message, 'error'); }
     setConfirmClear(null); setClearing(false);
+  };
+
+  // ── Clear ALL data with password gate ────────────────────────────────────────
+  const CLEAR_ALL_PASSWORD = 'MAJUPAT-RESET-2024';
+
+  const handleClearAllVerify = () => {
+    if (clearAllPass.trim() !== CLEAR_ALL_PASSWORD) {
+      setClearAllError('Incorrect password. Please try again.');
+      return;
+    }
+    setClearAllError('');
+    setClearAllStep(2);
+  };
+
+  const handleClearAllConfirm = async () => {
+    setClearingAll(true);
+    try {
+      // Delete all rows using neq on id (matches everything)
+      // Order: children before parents to avoid FK violations
+      const tables = [
+        'gl_entries',
+        'audit_log',
+        'deduction_rules',
+        'collections',
+        'collector_assignments',
+        'hp_payments',
+        'pending_approvals',
+        'pending_transactions',
+        'transactions',
+        'notifications',
+        'loans',
+        'hp_agreements',
+        'accounts',
+        'customers',
+        'collectors',
+        'hp_items',
+        'products',
+        'gl_accounts',
+      ];
+
+      for (const tbl of tables) {
+        const { error } = await supabase.from(tbl)
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error) console.warn(`Clear ${tbl}:`, error.message);
+      }
+
+      // Delete all users except keep none (we'll re-insert defaults)
+      await supabase.from('users')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+
+      // Delete system_settings (uses text PK)
+      await supabase.from('system_settings')
+        .delete()
+        .neq('key', '___never___');
+
+      // Re-insert default admin + teller
+      await supabase.from('users').upsert([
+        { id:'00000000-0000-0000-0000-000000000001', name:'Admin User', email:'admin@majupat.com',  password:'admin123',  role:'admin'  },
+        { id:'00000000-0000-0000-0000-000000000002', name:'Teller One', email:'teller@majupat.com', password:'teller123', role:'teller' },
+      ], { onConflict:'email' });
+
+      // Re-insert system settings
+      await supabase.from('system_settings').upsert({
+        key: 'approval_rules',
+        value: {
+          credit_threshold:   { enabled:true,  amount:10000, roles:['teller','collector'] },
+          debit_threshold:    { enabled:true,  amount:5000,  roles:['teller','collector'] },
+          transfer_threshold: { enabled:true,  amount:5000,  roles:['teller','manager']   },
+          account_opening:    { enabled:false, roles:['teller'] },
+          loan_creation:      { enabled:true,  roles:['teller'] },
+          gl_entry:           { enabled:true,  roles:['teller','manager'] },
+          customer_creation:  { enabled:false, roles:['teller'] },
+          user_creation:      { enabled:false, roles:[] },
+        },
+      }, { onConflict:'key' });
+
+      // Re-insert GL chart of accounts
+      const glAccounts = [
+        { code:'1000', name:'Cash in Hand',              type:'asset',    category:'current_asset',     description:'Physical cash in vault',         is_system:true },
+        { code:'1010', name:'Main Operating Account',    type:'asset',    category:'current_asset',     description:'Primary bank account',           is_system:true },
+        { code:'1020', name:'Customer Deposits Account', type:'asset',    category:'current_asset',     description:'Held customer deposits',         is_system:true },
+        { code:'1030', name:'Savings Pool Account',      type:'asset',    category:'current_asset',     description:'Pooled savings funds',           is_system:true },
+        { code:'1100', name:'Loan Receivables',          type:'asset',    category:'current_asset',     description:'Outstanding loans',              is_system:true },
+        { code:'1110', name:'Interest Receivable',       type:'asset',    category:'current_asset',     description:'Accrued interest from loans',    is_system:true },
+        { code:'2000', name:'Current Accounts',          type:'liability',category:'current_liability', description:'Customer demand deposits',        is_system:true },
+        { code:'2010', name:'Savings Accounts',          type:'liability',category:'current_liability', description:'Interest-bearing deposits',       is_system:true },
+        { code:'2020', name:'Fixed Deposits',            type:'liability',category:'current_liability', description:'Time-bound deposits',            is_system:true },
+        { code:'2100', name:'Interest Payable',          type:'liability',category:'current_liability', description:'Interest owed to customers',     is_system:true },
+        { code:'3000', name:'Share Capital',             type:'equity',   category:'equity',            description:'Owner investments',              is_system:true },
+        { code:'3010', name:'Retained Earnings',         type:'equity',   category:'equity',            description:'Accumulated profits',            is_system:true },
+        { code:'4000', name:'Loan Interest Income',      type:'revenue',  category:'interest_income',   description:'Interest from loans',            is_system:true },
+        { code:'4100', name:'Account Maintenance Fees',  type:'revenue',  category:'fee_income',        description:'Monthly account fees',           is_system:true },
+        { code:'4110', name:'Transaction Fees',          type:'revenue',  category:'fee_income',        description:'Per-transaction charges',        is_system:true },
+        { code:'5000', name:'Interest on Savings',       type:'expense',  category:'interest_expense',  description:'Paid to savings customers',      is_system:true },
+        { code:'5100', name:'Employee Salaries',         type:'expense',  category:'operating_expense', description:'Staff compensation',             is_system:true },
+        { code:'5110', name:'Rent Expense',              type:'expense',  category:'operating_expense', description:'Office rent',                    is_system:true },
+        { code:'5200', name:'Loan Loss Provision',       type:'expense',  category:'provision',         description:'Expected loan defaults',         is_system:true },
+      ];
+      await supabase.from('gl_accounts').upsert(glAccounts, { onConflict:'code' });
+
+      await loadCounts();
+      showMsg('All data cleared. Database is fresh and ready.', 'success');
+      setClearAllModal(false);
+      setClearAllPass('');
+      setClearAllStep(1);
+    } catch (e) {
+      showMsg('Clear failed: ' + e.message, 'error');
+    }
+    setClearingAll(false);
+  };
+
+  const closeClearAll = () => {
+    setClearAllModal(false);
+    setClearAllPass('');
+    setClearAllStep(1);
+    setClearAllError('');
+  };
+
+  const handleDownloadAll = async () => {
+    setDownloading(true);
+    try {
+      await exportFullDatabase(supabase);
+      showMsg('Database exported successfully as ZIP file.', 'success');
+    } catch (e) {
+      showMsg('Export failed: ' + e.message, 'error');
+    }
+    setDownloading(false);
+  };
+
+  const handleManualBackup = async () => {
+    setBackingUp(true);
+    const result = await runBackup(user?.name || 'admin');
+    if (result.success) {
+      showMsg(`Backup saved — ${result.totalRows} rows at ${result.label}`, 'success');
+      await loadBackupList();
+    } else {
+      showMsg('Backup failed: ' + result.error, 'error');
+    }
+    setBackingUp(false);
+  };
+
+  const handleRestore = async () => {
+    if (!restoreModal) return;
+    setRestoring(restoreModal.id);
+    const result = await restoreBackup(restoreModal.id);
+    if (result.success) {
+      showMsg(`Restored from backup: ${result.label}`, 'success');
+      await loadCounts();
+    } else {
+      showMsg('Restore failed: ' + result.error, 'error');
+    }
+    setRestoreModal(null);
+    setRestoring(null);
   };
 
   const updateRule = (key, field, value) => setRules(p => ({ ...p, [key]: { ...p[key], [field]: value } }));
@@ -418,6 +628,90 @@ export default function Settings() {
             </div>
           )}
 
+          {/* ── BACKUP TAB ── */}
+          {tab === 'backup' && isAdmin && (
+            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+
+              {/* Status card */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 20px', background:'var(--surface)', borderRadius:12, border:'2px solid var(--brand)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+                  <div style={{ width:44, height:44, borderRadius:12, background:'var(--blue-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    <Archive size={20} style={{ color:'var(--brand)' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:15, color:'var(--text)', marginBottom:3 }}>Auto-Backup Active</div>
+                    <div style={{ fontSize:12, color:'var(--text-3)' }}>
+                      Runs every <strong>30 minutes</strong> automatically while you are logged in.
+                      {lastBackup && <> Last backup: <strong style={{ color:'var(--brand)' }}>{lastBackup.label}</strong> — {lastBackup.size_rows?.toLocaleString()} rows</>}
+                    </div>
+                  </div>
+                </div>
+                <button className="btn btn-primary" onClick={handleManualBackup} disabled={backingUp} style={{ whiteSpace:'nowrap', marginLeft:16 }}>
+                  <Archive size={14} />{backingUp ? 'Backing up…' : 'Backup Now'}
+                </button>
+              </div>
+
+              {/* Backup list */}
+              <div className="card" style={{ padding:0, overflow:'hidden' }}>
+                <div style={{ padding:'14px 18px', background:'var(--surface-2)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <Archive size={14} style={{ color:'var(--brand)' }} />
+                    <span style={{ fontWeight:700, fontSize:13 }}>Saved Backups</span>
+                    <span style={{ fontSize:12, color:'var(--text-3)' }}>— last 48 kept (24 hours)</span>
+                  </div>
+                  <button className="btn btn-secondary btn-sm" onClick={loadBackupList} disabled={loadingBackups}>
+                    <RefreshCw size={13} className={loadingBackups ? 'spin' : ''} />Refresh
+                  </button>
+                </div>
+
+                {loadingBackups ? (
+                  <div style={{ padding:32, textAlign:'center', color:'var(--text-3)' }}>Loading backups…</div>
+                ) : backups.length === 0 ? (
+                  <div style={{ padding:32, textAlign:'center', color:'var(--text-3)' }}>
+                    <Archive size={32} style={{ opacity:0.3, marginBottom:8 }} />
+                    <div>No backups yet. Click "Backup Now" to create one.</div>
+                  </div>
+                ) : (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Date & Time</th>
+                          <th>Created By</th>
+                          <th style={{ textAlign:'right' }}>Rows</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {backups.map((b, i) => (
+                          <tr key={b.id} style={{ background: i === 0 ? 'var(--blue-bg)' : undefined }}>
+                            <td style={{ fontSize:12, color:'var(--text-3)', fontWeight:600 }}>
+                              {i === 0 ? <span style={{ color:'var(--brand)', fontWeight:800 }}>Latest</span> : `#${backups.length - i}`}
+                            </td>
+                            <td style={{ fontWeight:600, fontSize:13 }}>{b.label}</td>
+                            <td style={{ fontSize:12, color:'var(--text-3)' }}>{b.created_by || '—'}</td>
+                            <td style={{ textAlign:'right', fontWeight:700, fontFamily:'monospace' }}>{(b.size_rows || 0).toLocaleString()}</td>
+                            <td>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => setRestoreModal(b)}
+                                disabled={!!restoring}
+                                style={{ whiteSpace:'nowrap' }}>
+                                <RotateCcw size={12} />
+                                {restoring === b.id ? 'Restoring…' : 'Restore'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── DATA MANAGEMENT ── */}
           {tab === 'data' && isAdmin && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -442,6 +736,50 @@ export default function Settings() {
                 </div>
                 <button className="btn btn-secondary btn-sm" onClick={loadCounts} disabled={loadingCounts}>
                   <RefreshCw size={13} className={loadingCounts ? 'spin' : ''} />Refresh Counts
+                </button>
+              </div>
+
+              {/* ── DOWNLOAD ALL DATA ── */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 20px', background:'var(--surface)', borderRadius:12, border:'2px solid var(--brand)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+                  <div style={{ width:44, height:44, borderRadius:12, background:'var(--blue-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                    <Download size={20} style={{ color:'var(--brand)' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:15, color:'var(--text)', marginBottom:3 }}>Download All Data</div>
+                    <div style={{ fontSize:12, color:'var(--text-3)' }}>
+                      Export every table (users, customers, accounts, transactions, loans, HP, collections…) as a ZIP of CSV files.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleDownloadAll}
+                  disabled={downloading}
+                  style={{ whiteSpace:'nowrap', marginLeft:16 }}>
+                  <Download size={14} />
+                  {downloading ? 'Exporting…' : 'Download ZIP'}
+                </button>
+              </div>
+
+              {/* ── NUCLEAR: Clear ALL data ── */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', background: '#1a0000', borderRadius: 12, border: '2px solid #dc2626' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Trash2 size={20} style={{ color: '#fff' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: '#fff', marginBottom: 3 }}>Clear All Data</div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
+                      Wipe every record from the database. Requires admin password. Cannot be undone.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn btn-danger"
+                  onClick={() => { setClearAllModal(true); setClearAllStep(1); setClearAllPass(''); setClearAllError(''); }}
+                  style={{ whiteSpace: 'nowrap', marginLeft: 16, background: '#dc2626', borderColor: '#dc2626' }}>
+                  <Trash2 size={14} /> Clear All Data
                 </button>
               </div>
 
@@ -512,6 +850,31 @@ export default function Settings() {
         </div>{/* end content */}
       </div>{/* end layout */}
 
+      {/* ── Restore Backup Modal ── */}
+      <Modal
+        open={!!restoreModal}
+        onClose={() => setRestoreModal(null)}
+        title="Restore Backup"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setRestoreModal(null)}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleRestore} disabled={!!restoring}>
+            <RotateCcw size={14} />{restoring ? 'Restoring…' : 'Restore This Backup'}
+          </button>
+        </>}>
+        {restoreModal && (
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div style={{ padding:'14px 16px', background:'var(--blue-bg)', borderRadius:10, border:'1px solid #bfdbfe' }}>
+              <div style={{ fontWeight:800, fontSize:14, color:'#1e40af', marginBottom:4 }}>📦 {restoreModal.label}</div>
+              <div style={{ fontSize:13, color:'#1e3a8a' }}>{(restoreModal.size_rows || 0).toLocaleString()} rows · Created by {restoreModal.created_by}</div>
+            </div>
+            <div className="alert alert-warning">
+              <AlertTriangle size={14} />
+              This will <strong>replace all current data</strong> with this backup. Current data will be lost.
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* ── Confirm Delete Modal ── */}
       <Modal open={!!confirmClear} onClose={() => setConfirmClear(null)} title={`Clear ${confirmClear?.label}`}
         footer={<>
@@ -533,6 +896,82 @@ export default function Settings() {
             Permanently delete <strong>{(tableCounts[confirmClear?.key] || 0).toLocaleString()} rows</strong>? This <strong>cannot be undone</strong>.
           </div>
         </div>
+      </Modal>
+
+      {/* ── Clear ALL Data Modal ── */}
+      <Modal
+        open={clearAllModal}
+        onClose={closeClearAll}
+        title={clearAllStep === 1 ? '🔐 Admin Password Required' : '⚠️ Final Confirmation'}
+        footer={
+          clearAllStep === 1 ? (
+            <>
+              <button className="btn btn-secondary" onClick={closeClearAll}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleClearAllVerify}>
+                <Lock size={14} /> Verify Password
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-secondary" onClick={closeClearAll} disabled={clearingAll}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleClearAllConfirm} disabled={clearingAll}>
+                <Trash2 size={14} /> {clearingAll ? 'Clearing everything…' : 'Yes, Delete All Data'}
+              </button>
+            </>
+          )
+        }>
+
+        {clearAllStep === 1 && (
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            <div style={{ padding:'14px 16px', background:'#fef2f2', borderRadius:10, border:'1px solid #fca5a5' }}>
+              <div style={{ fontWeight:800, fontSize:14, color:'#991b1b', marginBottom:4 }}>
+                This will permanently delete ALL data
+              </div>
+              <div style={{ fontSize:13, color:'#7f1d1d', lineHeight:1.6 }}>
+                Customers, accounts, transactions, loans, HP agreements, collections, and all other records will be wiped. Only the default admin and teller accounts will remain.
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize:12, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.06em', display:'block', marginBottom:8 }}>
+                Admin Password
+              </label>
+              <input
+                type="password"
+                className="form-control"
+                placeholder="Enter admin password to continue…"
+                value={clearAllPass}
+                onChange={e => { setClearAllPass(e.target.value); setClearAllError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handleClearAllVerify()}
+                autoFocus
+                style={{ fontSize:15 }}
+              />
+              {clearAllError && (
+                <div style={{ marginTop:8, fontSize:13, color:'var(--red)', display:'flex', alignItems:'center', gap:6 }}>
+                  <AlertTriangle size={13} /> {clearAllError}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {clearAllStep === 2 && (
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            <div style={{ textAlign:'center', padding:'20px 0' }}>
+              <div style={{ fontSize:48, marginBottom:12 }}>🗑️</div>
+              <div style={{ fontWeight:900, fontSize:18, color:'#991b1b', marginBottom:8 }}>
+                Are you absolutely sure?
+              </div>
+              <div style={{ fontSize:14, color:'var(--text-3)', lineHeight:1.7 }}>
+                You are about to delete <strong style={{ color:'var(--red)' }}>every record</strong> in the database.<br />
+                This action is <strong>irreversible</strong>.<br />
+                Total rows to delete: <strong style={{ color:'var(--red)' }}>{totalRows.toLocaleString()}</strong>
+              </div>
+            </div>
+            <div style={{ padding:'12px 16px', background:'#fef2f2', borderRadius:10, border:'1px solid #fca5a5', fontSize:13, color:'#7f1d1d', textAlign:'center', fontWeight:600 }}>
+              ⚠️ The default admin and teller accounts will be restored automatically.
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

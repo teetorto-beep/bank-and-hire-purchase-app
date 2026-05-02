@@ -277,3 +277,77 @@ export function exportCollectionReportPDF({ collections, period }) {
 
   doc.save(`collection-report-${Date.now()}.pdf`);
 }
+
+// ── Full Database Export (ZIP of CSVs) ────────────────────────────────────────
+// Downloads all tables as individual CSV files bundled in a ZIP
+export async function exportFullDatabase(supabaseClient) {
+  // Dynamically import JSZip — add to package.json if not present
+  let JSZip;
+  try {
+    JSZip = (await import('jszip')).default;
+  } catch {
+    // Fallback: download each table as separate CSV files
+    await exportFullDatabaseAsCSVs(supabaseClient);
+    return;
+  }
+
+  const zip = new JSZip();
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  const folder = zip.folder(`majupat-backup-${timestamp}`);
+
+  const EXPORT_TABLES = [
+    'users', 'customers', 'accounts', 'transactions',
+    'pending_transactions', 'pending_approvals', 'loans',
+    'hp_agreements', 'hp_payments', 'hp_items', 'products',
+    'collectors', 'collector_assignments', 'collections',
+    'deduction_rules', 'notifications', 'system_settings',
+    'audit_log', 'gl_accounts', 'gl_entries',
+  ];
+
+  for (const tbl of EXPORT_TABLES) {
+    try {
+      const { data } = await supabaseClient.from(tbl).select('*').order('created_at', { ascending: true }).limit(50000);
+      if (data?.length) {
+        const csv = Papa.unparse(data);
+        folder.file(`${tbl}.csv`, csv);
+      } else {
+        folder.file(`${tbl}.csv`, '');
+      }
+    } catch (_) {
+      folder.file(`${tbl}.csv`, '');
+    }
+  }
+
+  // Add a manifest
+  folder.file('_manifest.txt',
+    `Majupat Love Enterprise — Full Database Export\n` +
+    `Generated: ${new Date().toLocaleString()}\n` +
+    `Tables: ${EXPORT_TABLES.join(', ')}\n`
+  );
+
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `majupat-backup-${timestamp}.zip`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// Fallback: download as a single merged CSV if JSZip not available
+async function exportFullDatabaseAsCSVs(supabaseClient) {
+  const EXPORT_TABLES = [
+    'users', 'customers', 'accounts', 'transactions',
+    'loans', 'hp_agreements', 'hp_payments', 'collections',
+    'collectors', 'products', 'hp_items', 'notifications',
+  ];
+
+  for (const tbl of EXPORT_TABLES) {
+    try {
+      const { data } = await supabaseClient.from(tbl).select('*').limit(50000);
+      if (data?.length) exportCSV(data, tbl);
+    } catch (_) {}
+    // Small delay between downloads
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
