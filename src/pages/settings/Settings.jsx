@@ -397,7 +397,7 @@ export default function Settings() {
             ['Web Login', 'Go to the web app URL. Enter your Email and Password. Click Sign In.'],
             ['Default Admin', 'Email: admin@majupat.com | Password: admin123'],
             ['Default Teller', 'Email: teller@majupat.com | Password: teller123'],
-            ['Security', 'Change default passwords immediately after first login via Settings → Users.'],
+            ['Security', 'Change default passwords immediately after first login via Settings > Users.'],
             ['Forgot Password', 'Contact your system administrator to reset via the Users management page.'],
           ]
         },
@@ -423,60 +423,60 @@ export default function Settings() {
           title: '5. Account Management',
           content: [
             ['Account Types', 'Savings, Current, Fixed Deposit, Hire Purchase, Joint.'],
-            ['Open Account', 'Menu: Accounts → Open Account. Search customer, select type and product, enter initial deposit, click Submit.'],
-            ['Account 360°', 'Full customer view: all accounts, balances, loans, HP agreements, recent transactions. Can apply balance to offset a loan.'],
+            ['Open Account', 'Menu: Accounts > Open Account. Search customer, select type and product, enter initial deposit, click Submit.'],
+            ['Account 360', 'Full customer view: all accounts, balances, loans, HP agreements, recent transactions. Can apply balance to offset a loan.'],
             ['Account Status', 'Active (normal), Dormant (inactive), Frozen (blocked), Closed (permanently closed).'],
           ]
         },
         {
           title: '6. Teller Operations',
           content: [
-            ['Post Credit', 'Search account → select → enter amount → select Credit → enter narration → Post Transaction.'],
-            ['Post Debit', 'Search account → select → enter amount → select Debit → enter narration → Post Transaction.'],
-            ['Fund Transfer', 'Search source account → enter amount → search destination → enter narration → Transfer.'],
+            ['Post Credit', 'Search account, select, enter amount, select Credit, enter narration, click Post Transaction.'],
+            ['Post Debit', 'Search account, select, enter amount, select Debit, enter narration, click Post Transaction.'],
+            ['Fund Transfer', 'Search source account, enter amount, search destination account, enter narration, click Transfer.'],
             ['Approval Threshold', 'Amounts above the configured threshold go to Pending Approvals instead of posting immediately.'],
-            ['Reverse Transaction', 'Admin/Manager only. Go to Transaction History → find transaction → click Reverse → enter reason → Confirm.'],
+            ['Reverse Transaction', 'Admin/Manager only. Go to Transaction History, find transaction, click Reverse, enter reason, click Confirm.'],
           ]
         },
         {
           title: '7. Transaction History & Statements',
           content: [
-            ['History', 'Menu: Transactions → History. Search, filter by type/date, export CSV or PDF, view details, reverse (admin only).'],
-            ['Statement', 'Menu: Transactions → Statement. Search account, select period, click Generate Statement. Shows opening/closing balance, full transaction list, loan summary, HP summary. Export: Print, CSV, PDF.'],
+            ['History', 'Menu: Transactions > History. Search, filter by type/date, export CSV or PDF, view details, reverse (admin only).'],
+            ['Statement', 'Menu: Transactions > Statement. Search account, select period, click Generate Statement. Shows opening/closing balance, full transaction list, loan summary, HP summary. Export: Print, CSV, PDF.'],
           ]
         },
         {
           title: '8. Pending Approvals',
           content: [
             ['What Appears', 'Transactions above threshold, account opening requests from collectors, loan applications.'],
-            ['Approve', 'Review details → click Approve (green). Item processes immediately.'],
-            ['Reject', 'Click Reject (red) → enter reason → Confirm Rejection. Submitter is notified.'],
+            ['Approve', 'Review details, click Approve (green button). Item processes immediately.'],
+            ['Reject', 'Click Reject (red button), enter reason, click Confirm Rejection. Submitter is notified.'],
           ]
         },
         {
           title: '9. Loans',
           content: [
             ['Loan Types', 'Personal, Micro, Mortgage, Emergency, Group, Hire Purchase.'],
-            ['Apply', 'Menu: Loans → New Loan. Select customer, account, product, enter amount, tenure, rate. Choose Amortization or Flat Rate method. Click Submit.'],
-            ['Repayment', 'From Loans list → click $ button → enter amount → Record Repayment. Reduces loans.outstanding. Marks Completed when zero.'],
-            ['Status', 'Pending → Active → Overdue → Completed (or Rejected).'],
-            ['Calculator', 'Menu: Loans → Calculator. Calculate repayments before creating a loan.'],
+            ['Apply', 'Menu: Loans > New Loan. Select customer, account, product, enter amount, tenure, rate. Choose Amortization or Flat Rate method. Click Submit.'],
+            ['Repayment', 'From Loans list, click the $ button, enter amount, click Record Repayment. Reduces outstanding balance. Marks Completed when zero.'],
+            ['Status Flow', 'Pending > Active > Overdue > Completed (or Rejected).'],
+            ['Calculator', 'Menu: Loans > Calculator. Calculate repayments before creating a loan.'],
           ]
         },
         {
           title: '10. Hire Purchase (HP)',
           content: [
-            ['Items Catalogue', 'Menu: HP → Items. Add items with name, price, daily/weekly payment, stock.'],
-            ['Create Agreement', 'Menu: HP → Agreements → New. Select customer, item, frequency, down payment. Optionally generate linked loan with interest rate and tenure.'],
-            ['Record Payment', 'From Agreements list → click Pay → enter amount → Record Payment. Updates total_paid, remaining, and linked loan outstanding.'],
-            ['Payment History', 'HP → Agreements → Payment History tab shows all payments with collector and remaining balance.'],
+            ['Items Catalogue', 'Menu: HP > Items. Add items with name, price, daily/weekly payment, stock quantity.'],
+            ['Create Agreement', 'Menu: HP > Agreements > New. Select customer, item, frequency, down payment. Optionally generate linked loan with interest rate and tenure.'],
+            ['Record Payment', 'From Agreements list, click Pay, enter amount, click Record Payment. Updates total paid, remaining balance, and linked loan outstanding.'],
+            ['Payment History', 'HP > Agreements > Payment History tab shows all payments with collector name and remaining balance.'],
           ]
         },
         {
           title: '11. Collectors & Field Collections',
           content: [
-            ['Add Collector', 'Menu: Collectors → New Collector. Enter name, phone, zone, username, password.'],
-            ['Collection Report', 'Menu: Collectors → Collection Report. View by collector, date range, payment type. Export PDF.'],
+            ['Add Collector', 'Menu: Collectors > New Collector. Enter name, phone, zone, username, password.'],
+            ['Collection Report', 'Menu: Collectors > Collection Report. View by collector, date range, payment type. Export PDF.'],
             ['Mobile App', 'Collectors use the Android Collector App with their username/password to record field collections.'],
           ]
         },
@@ -493,22 +493,22 @@ export default function Settings() {
           title: '13. General Ledger (GL)',
           content: [
             ['Chart of Accounts', '1000-1999: Assets | 2000-2999: Liabilities | 3000-3999: Equity | 4000-4999: Revenue | 5000-5999: Expenses.'],
-            ['Post Journal Entry', 'GL → Post Entry. Select debit account, credit account, enter amount and narration. May require approval.'],
-            ['End of Day', 'GL → End of Day. Reconcile transactions, generate daily GL summary, close the day.'],
+            ['Post Journal Entry', 'GL > Post Entry. Select debit account, credit account, enter amount and narration. May require approval.'],
+            ['End of Day', 'GL > End of Day. Reconcile transactions, generate daily GL summary, close the day.'],
           ]
         },
         {
           title: '14. Products & HP Items',
           content: [
             ['Bank Products', 'Menu: Products. Define terms for accounts and loans: interest rate, min balance, monthly fee, tenure, benefits.'],
-            ['HP Items', 'Menu: HP → Items. Manage goods catalogue with price, daily/weekly payment amounts, stock levels.'],
+            ['HP Items', 'Menu: HP > Items. Manage goods catalogue with price, daily/weekly payment amounts, stock levels.'],
           ]
         },
         {
           title: '15. User Management',
           content: [
-            ['Add User', 'Menu: Users → New User. Enter name, email, password, role, phone. Click Save.'],
-            ['Edit User', 'Click Edit icon. Leave password blank to keep current. Click Save.'],
+            ['Add User', 'Menu: Users > New User. Enter name, email, password, role, phone. Click Save.'],
+            ['Edit User', 'Click Edit icon. Leave password blank to keep current password. Click Save.'],
             ['Roles', 'Admin: full access. Manager: all ops except users/settings. Teller: transactions & accounts. Collector: mobile app only. Viewer: read-only.'],
             ['Deactivate', 'Set Status to Inactive to block login without deleting the account.'],
           ]
@@ -516,24 +516,24 @@ export default function Settings() {
         {
           title: '16. Settings & Backups',
           content: [
-            ['Approval Rules', 'Settings → Approval Rules. Configure which operations require approval, threshold amounts, and which roles are affected.'],
+            ['Approval Rules', 'Settings > Approval Rules. Configure which operations require approval, threshold amounts, and which roles are affected.'],
             ['Auto-Backup', 'Saves all data to database every 30 minutes (configurable) while admin is logged in.'],
             ['Auto-Download', 'Downloads ZIP backup to your computer every 10 days (configurable).'],
-            ['Backup Schedule', 'Settings → Backups → Backup Schedule Settings. Set interval in minutes and download interval in days. Click Save Schedule.'],
+            ['Backup Schedule', 'Settings > Backups > Backup Schedule Settings. Set interval in minutes and download interval in days. Click Save Schedule.'],
             ['Export Backup', 'Each backup can be exported as CSV (ZIP), Excel (XLSX), or PDF (full detail with all table data).'],
-            ['Restore', 'Click Restore on any backup to roll back all data to that point.'],
+            ['Restore', 'Click Restore on any backup to roll back all data to that point in time.'],
             ['Delete Backup', 'Click the red trash icon on any backup row to delete it permanently.'],
-            ['Clear All Data', 'Settings → Data Management → Clear All Data. Enter your admin login password. Two-step confirmation required.'],
+            ['Clear All Data', 'Settings > Data Management > Clear All Data. Enter your admin login password. Two-step confirmation required.'],
           ]
         },
         {
           title: '17. Collector Mobile App',
           content: [
             ['Login', 'Enter username and password set by admin in the web system.'],
-            ['Record Collection', 'Collect tab → search account → select → choose type (Savings/Loan/HP) → enter amount → Post.'],
-            ['Savings', 'Increases account balance. Posts credit transaction.'],
-            ['Loan', 'Reduces loans.outstanding. Posts debit transaction.'],
-            ['HP', 'Reduces hp_agreements.remaining and linked loan outstanding. Posts debit transaction.'],
+            ['Record Collection', 'Collect tab: search account, select, choose type (Savings/Loan/HP), enter amount, tap Post.'],
+            ['Savings', 'Increases account balance. Posts a credit transaction to the database.'],
+            ['Loan', 'Reduces loans.outstanding. Posts a debit transaction to the database.'],
+            ['HP', 'Reduces hp_agreements.remaining and linked loan outstanding. Posts a debit transaction.'],
             ['Reports', 'View collection history with date range filter. Export PDF.'],
           ]
         },
@@ -542,9 +542,9 @@ export default function Settings() {
           content: [
             ['Login', 'Use App Username and App Password set by admin/teller in the web system.'],
             ['Home', 'Total portfolio balance, today\'s credits/debits, quick actions, overdue loan alerts, recent transactions.'],
-            ['Accounts', 'View all active accounts and balances.'],
+            ['Accounts', 'View all active accounts and their current balances.'],
             ['Loans', 'View active/overdue loans, outstanding balance, monthly payment, next due date.'],
-            ['History', 'Full transaction history with date filter.'],
+            ['History', 'Full transaction history with date range filter.'],
           ]
         },
         {
@@ -553,8 +553,8 @@ export default function Settings() {
             ['Admin', 'Full access: all operations, user management, settings, backup, data management.'],
             ['Manager', 'All operations except user management and system settings. Can approve transactions.'],
             ['Teller', 'Post transactions, view accounts, generate statements. Subject to approval rules.'],
-            ['Collector', 'Mobile app only. Record field collections.'],
-            ['Viewer', 'Read-only access to reports and dashboards.'],
+            ['Collector', 'Mobile app only. Record field collections for assigned customers.'],
+            ['Viewer', 'Read-only access to reports and dashboards. Cannot post transactions.'],
           ]
         },
         {
@@ -565,7 +565,7 @@ export default function Settings() {
             ['Loan Not Reducing', 'Loan must be Active or Overdue status. Verify loan is linked to the correct account/customer.'],
             ['HP Not Updating', 'HP agreement must be Active status and linked to the correct customer.'],
             ['Collector App Error', 'Check internet connection. Verify loan/HP agreement is Active in the web system.'],
-            ['Clear All Password', 'Use your admin login password (same as web app sign-in). Case-sensitive.'],
+            ['Clear All Password', 'Use your admin login password (same as web app sign-in). Passwords are case-sensitive.'],
             ['Backup Not Working', 'Ensure backups table exists in Supabase. Must be logged in as Admin or Manager.'],
           ]
         },
@@ -577,17 +577,18 @@ export default function Settings() {
         let y = 24;
         y = addSection(section.title, y);
 
-        for (const [label, text] of section.content) {
-          y = checkPage(doc, y, 18);
-          doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-          doc.setTextColor(30, 64, 175);
-          doc.text(label + ':', M, y);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(15, 23, 42);
-          const lines = doc.splitTextToSize(text, W - M - 50);
-          doc.text(lines, M + 42, y);
-          y += Math.max(lines.length * 4.5, 6) + 3;
-        }
+        autoTable(doc, {
+          startY: y,
+          body: section.content.map(([label, text]) => [label, text]),
+          styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
+          columnStyles: {
+            0: { cellWidth: 42, fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [30, 64, 175] },
+            1: { cellWidth: 140, textColor: [15, 23, 42] },
+          },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          tableLineColor: [226, 232, 240],
+          tableLineWidth: 0.3,
+        });
       }
 
       // Footer on all pages
