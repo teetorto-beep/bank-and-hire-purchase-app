@@ -241,77 +241,179 @@ export async function exportBackupExcel(backupId) {
   triggerDownload(blob, `majupat-backup-${ts}.xlsx`, blob.type);
 }
 
-// ── Export a single backup as PDF (summary) ───────────────────────────────────
+// ── Export a single backup as PDF (FULL DETAIL — all tables with data) ────────
 export async function exportBackupPDF(backupId) {
   const { data: backup } = await supabase
     .from('backups').select('data, label, created_at, created_by, size_rows').eq('id', backupId).single();
   if (!backup) return;
 
   const snapshot = backup.data;
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW = 210;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = 297;
+  const ts    = new Date(backup.created_at).toISOString().slice(0, 10);
 
-  // Header
-  doc.setFillColor(30, 64, 175);
-  doc.rect(0, 0, pageW, 22, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-  doc.text('Majupat Love Enterprise', 12, 14);
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-  doc.text('Database Backup Report', pageW - 12, 14, { align: 'right' });
+  const addHeader = (title) => {
+    doc.setFillColor(30, 64, 175);
+    doc.rect(0, 0, pageW, 18, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+    doc.text('Majupat Love Enterprise — Database Backup', 10, 12);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text(`${backup.label}  |  By: ${backup.created_by || '—'}  |  ${title}  |  Generated: ${new Date().toLocaleString()}`, pageW - 10, 12, { align: 'right' });
+  };
 
-  // Backup info
+  // ── PAGE 1: Cover + Table of Contents ────────────────────────────────────
+  addHeader('Cover');
   doc.setTextColor(15, 23, 42);
-  doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-  doc.text(`Backup: ${backup.label}`, 12, 32);
-  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+  doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+  doc.text('Full Database Backup Report', pageW / 2, 50, { align: 'center' });
+  doc.setFontSize(12); doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text(`Created by: ${backup.created_by || '—'}   |   Total rows: ${(backup.size_rows || 0).toLocaleString()}   |   Generated: ${new Date().toLocaleString()}`, 12, 38);
+  doc.text(`Backup Date: ${backup.label}`, pageW / 2, 62, { align: 'center' });
+  doc.text(`Total Records: ${(backup.size_rows || 0).toLocaleString()}`, pageW / 2, 70, { align: 'center' });
 
-  // Table summary
-  const summaryRows = BACKUP_TABLES.map(tbl => [
-    tbl,
-    (snapshot?.[tbl] || []).length.toLocaleString(),
-  ]);
-
+  // Table of contents
   autoTable(doc, {
-    startY: 44,
-    head: [['Table', 'Row Count']],
-    body: summaryRows,
-    styles: { fontSize: 9, cellPadding: 3 },
+    startY: 82,
+    head: [['Table', 'Records', 'Description']],
+    body: [
+      ['users',               (snapshot?.users||[]).length,               'System users and staff'],
+      ['customers',           (snapshot?.customers||[]).length,           'Registered customers'],
+      ['accounts',            (snapshot?.accounts||[]).length,            'Customer bank accounts'],
+      ['transactions',        (snapshot?.transactions||[]).length,        'All posted transactions'],
+      ['loans',               (snapshot?.loans||[]).length,               'Loan records'],
+      ['hp_agreements',       (snapshot?.hp_agreements||[]).length,       'Hire purchase agreements'],
+      ['hp_payments',         (snapshot?.hp_payments||[]).length,         'HP payment records'],
+      ['hp_items',            (snapshot?.hp_items||[]).length,            'HP items catalogue'],
+      ['products',            (snapshot?.products||[]).length,            'Bank products'],
+      ['collectors',          (snapshot?.collectors||[]).length,          'Field collectors'],
+      ['collections',         (snapshot?.collections||[]).length,         'Field collection records'],
+      ['pending_approvals',   (snapshot?.pending_approvals||[]).length,   'Pending approval requests'],
+      ['pending_transactions',(snapshot?.pending_transactions||[]).length,'Pending transactions'],
+      ['notifications',       (snapshot?.notifications||[]).length,       'System notifications'],
+      ['system_settings',     (snapshot?.system_settings||[]).length,     'System configuration'],
+      ['gl_accounts',         (snapshot?.gl_accounts||[]).length,         'Chart of accounts'],
+      ['gl_entries',          (snapshot?.gl_entries||[]).length,          'GL journal entries'],
+      ['audit_log',           (snapshot?.audit_log||[]).length,           'Audit trail'],
+      ['deduction_rules',     (snapshot?.deduction_rules||[]).length,     'Auto-deduction rules'],
+    ].map(([t, c, d]) => [t, Number(c).toLocaleString(), d]),
+    styles: { fontSize: 8, cellPadding: 2.5 },
     headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [248, 250, 252] },
-    columnStyles: {
-      0: { cellWidth: 80 },
-      1: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
-    },
+    columnStyles: { 0: { cellWidth: 55, fontStyle: 'bold' }, 1: { cellWidth: 25, halign: 'right' }, 2: { cellWidth: 100 } },
   });
 
-  // Customers summary
-  const customers = snapshot?.customers || [];
-  const accounts  = snapshot?.accounts  || [];
-  const loans     = snapshot?.loans     || [];
-  const txns      = snapshot?.transactions || [];
+  // ── Helper: add a data table for a section ────────────────────────────────
+  const addSection = (title, rows, columns, colWidths) => {
+    if (!rows || rows.length === 0) return;
+    doc.addPage();
+    addHeader(title);
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+    doc.text(`${title} (${rows.length.toLocaleString()} records)`, 10, 26);
 
-  const finalY = (doc.lastAutoTable?.finalY || 100) + 10;
-  doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(15, 23, 42);
-  doc.text('Summary Statistics', 12, finalY);
-  autoTable(doc, {
-    startY: finalY + 4,
-    body: [
-      ['Total Customers',    customers.length.toLocaleString()],
-      ['Total Accounts',     accounts.length.toLocaleString()],
-      ['Active Loans',       loans.filter(l => l.status === 'active').length.toLocaleString()],
-      ['Total Transactions', txns.length.toLocaleString()],
-      ['Total Loan Book',    'GHC ' + loans.reduce((s, l) => s + Number(l.outstanding || 0), 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })],
-    ],
-    styles: { fontSize: 9, cellPadding: 3 },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    columnStyles: { 0: { cellWidth: 80, fontStyle: 'bold' }, 1: { cellWidth: 60, halign: 'right' } },
-  });
+    const body = rows.map(r => columns.map(c => {
+      const v = r[c];
+      if (v === null || v === undefined) return '—';
+      if (typeof v === 'object') return JSON.stringify(v).slice(0, 60);
+      return String(v).slice(0, 80);
+    }));
 
-  const ts = new Date(backup.created_at).toISOString().slice(0, 10);
-  doc.save(`majupat-backup-${ts}.pdf`);
+    const styles = {};
+    colWidths.forEach((w, i) => { styles[i] = { cellWidth: w }; });
+
+    autoTable(doc, {
+      startY: 30,
+      head: [columns],
+      body,
+      styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: styles,
+    });
+  };
+
+  // ── CUSTOMERS ─────────────────────────────────────────────────────────────
+  addSection('Customers', snapshot?.customers || [],
+    ['id','name','phone','email','ghana_card','address','occupation','kyc_status','created_at'],
+    [40,35,25,40,28,40,30,18,28]);
+
+  // ── ACCOUNTS ─────────────────────────────────────────────────────────────
+  addSection('Accounts', snapshot?.accounts || [],
+    ['account_number','type','balance','status','interest_rate','opened_at','customer_id'],
+    [30,22,22,16,16,28,40]);
+
+  // ── TRANSACTIONS ──────────────────────────────────────────────────────────
+  addSection('Transactions', snapshot?.transactions || [],
+    ['reference','type','amount','narration','balance_after','channel','poster_name','created_at'],
+    [38,14,20,55,22,18,25,28]);
+
+  // ── LOANS ─────────────────────────────────────────────────────────────────
+  addSection('Loans', snapshot?.loans || [],
+    ['id','type','amount','outstanding','total_repayment','interest_rate','tenure','monthly_payment','status','disbursed_at'],
+    [40,20,20,22,24,14,12,22,16,28]);
+
+  // ── HP AGREEMENTS ─────────────────────────────────────────────────────────
+  addSection('HP Agreements', snapshot?.hp_agreements || [],
+    ['id','item_name','total_price','down_payment','total_paid','remaining','payment_frequency','status','last_payment_date'],
+    [40,35,20,20,20,20,22,16,28]);
+
+  // ── HP PAYMENTS ───────────────────────────────────────────────────────────
+  addSection('HP Payments', snapshot?.hp_payments || [],
+    ['id','agreement_id','amount','remaining','note','collected_by','created_at'],
+    [40,40,20,20,40,30,28]);
+
+  // ── HP ITEMS ──────────────────────────────────────────────────────────────
+  addSection('HP Items', snapshot?.hp_items || [],
+    ['name','category','price','daily_payment','weekly_payment','stock','status'],
+    [45,30,22,22,22,16,18]);
+
+  // ── PRODUCTS ──────────────────────────────────────────────────────────────
+  addSection('Products', snapshot?.products || [],
+    ['name','category','interest_rate','min_balance','monthly_fee','tenure_months','status'],
+    [45,30,18,22,18,18,16]);
+
+  // ── COLLECTORS ────────────────────────────────────────────────────────────
+  addSection('Collectors', snapshot?.collectors || [],
+    ['name','phone','zone','username','status','total_collected','created_at'],
+    [40,25,25,25,16,25,28]);
+
+  // ── COLLECTIONS ───────────────────────────────────────────────────────────
+  addSection('Collections', snapshot?.collections || [],
+    ['collector_name','customer_name','amount','payment_type','notes','status','created_at'],
+    [35,35,20,20,45,16,28]);
+
+  // ── USERS ─────────────────────────────────────────────────────────────────
+  addSection('Users', (snapshot?.users || []).map(u => ({ ...u, password: '***' })),
+    ['name','email','role','phone','status','created_at'],
+    [40,50,20,25,16,28]);
+
+  // ── GL ACCOUNTS ───────────────────────────────────────────────────────────
+  addSection('GL Accounts', snapshot?.gl_accounts || [],
+    ['code','name','type','category','balance','status'],
+    [18,60,20,30,22,16]);
+
+  // ── GL ENTRIES ────────────────────────────────────────────────────────────
+  addSection('GL Entries', snapshot?.gl_entries || [],
+    ['journal_ref','gl_account_code','gl_account_name','entry_type','amount','narration','created_at'],
+    [35,18,40,14,20,50,28]);
+
+  // ── PENDING APPROVALS ─────────────────────────────────────────────────────
+  addSection('Pending Approvals', snapshot?.pending_approvals || [],
+    ['type','submitter_name','status','approver_name','submitted_at'],
+    [30,40,16,40,28]);
+
+  // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+  addSection('Notifications', snapshot?.notifications || [],
+    ['title','message','type','read','created_at'],
+    [50,80,16,12,28]);
+
+  // ── AUDIT LOG ─────────────────────────────────────────────────────────────
+  addSection('Audit Log', snapshot?.audit_log || [],
+    ['action','entity','user_name','detail','timestamp'],
+    [30,25,30,80,28]);
+
+  doc.save(`majupat-full-backup-${ts}.pdf`);
 }
 
 // ── Helper: trigger browser download ─────────────────────────────────────────
