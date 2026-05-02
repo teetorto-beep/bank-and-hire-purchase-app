@@ -283,6 +283,331 @@ export default function Settings() {
     setClearAllError('');
   };
 
+  const [generatingGuide, setGeneratingGuide] = useState(false);
+
+  const handleDownloadUserGuide = async () => {
+    setGeneratingGuide(true);
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const W = 210, M = 14;
+
+      const addPageHeader = (title) => {
+        doc.setFillColor(30, 64, 175);
+        doc.rect(0, 0, W, 16, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+        doc.text('Majupat Love Enterprise — User Guide', M, 11);
+        doc.setFont('helvetica', 'normal');
+        doc.text(title, W - M, 11, { align: 'right' });
+        doc.setTextColor(15, 23, 42);
+      };
+
+      const addSection = (title, startY) => {
+        doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 64, 175);
+        doc.text(title, M, startY);
+        doc.setDrawColor(30, 64, 175);
+        doc.setLineWidth(0.4);
+        doc.line(M, startY + 2, W - M, startY + 2);
+        doc.setTextColor(15, 23, 42);
+        return startY + 8;
+      };
+
+      const addText = (text, x, y, maxW, size = 9, bold = false) => {
+        doc.setFontSize(size);
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        doc.setTextColor(15, 23, 42);
+        const lines = doc.splitTextToSize(text, maxW);
+        doc.text(lines, x, y);
+        return y + lines.length * (size * 0.4 + 1.2);
+      };
+
+      const checkPage = (doc, y, needed = 20) => {
+        if (y + needed > 275) { doc.addPage(); addPageHeader('continued'); return 24; }
+        return y;
+      };
+
+      // ── COVER PAGE ──────────────────────────────────────────────────────────
+      doc.setFillColor(30, 64, 175);
+      doc.rect(0, 0, W, 80, 'F');
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(W/2 - 20, 20, 40, 40, 6, 6, 'F');
+      doc.setTextColor(30, 64, 175);
+      doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+      doc.text('ML', W/2, 46, { align: 'center' });
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(20); doc.setFont('helvetica', 'bold');
+      doc.text('Majupat Love Enterprise', W/2, 72, { align: 'center' });
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(16); doc.setFont('helvetica', 'bold');
+      doc.text('Complete User Guide', W/2, 100, { align: 'center' });
+      doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Banking & Hire Purchase Management System', W/2, 110, { align: 'center' });
+      doc.text('Version 2.0  |  Developed by Maxbraynn Technology & Systems', W/2, 118, { align: 'center' });
+      doc.text(`Generated: ${new Date().toLocaleDateString('en-GH', { day:'numeric', month:'long', year:'numeric' })}`, W/2, 126, { align: 'center' });
+
+      autoTable(doc, {
+        startY: 140,
+        head: [['Section', 'Topic']],
+        body: [
+          ['1', 'Introduction & System Overview'],
+          ['2', 'Login & Access'],
+          ['3', 'Dashboard'],
+          ['4', 'Customer Management'],
+          ['5', 'Account Management'],
+          ['6', 'Teller Operations'],
+          ['7', 'Transaction History & Statements'],
+          ['8', 'Pending Approvals'],
+          ['9', 'Loans'],
+          ['10', 'Hire Purchase (HP)'],
+          ['11', 'Collectors & Field Collections'],
+          ['12', 'Reports'],
+          ['13', 'General Ledger'],
+          ['14', 'Products & HP Items'],
+          ['15', 'User Management'],
+          ['16', 'Settings & Backups'],
+          ['17', 'Collector Mobile App'],
+          ['18', 'Customer Mobile App'],
+          ['19', 'Roles & Permissions'],
+          ['20', 'Troubleshooting'],
+        ],
+        styles: { fontSize: 9, cellPadding: 2.5 },
+        headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: { 0: { cellWidth: 15, halign: 'center', fontStyle: 'bold' }, 1: { cellWidth: 140 } },
+      });
+
+      // ── SECTIONS ────────────────────────────────────────────────────────────
+      const sections = [
+        {
+          title: '1. Introduction & System Overview',
+          content: [
+            ['Overview', 'Majupat Love Enterprise is a full-featured microfinance and hire-purchase management platform supporting customer onboarding, savings accounts, loans, HP agreements, field collections, and full double-entry bookkeeping.'],
+            ['Web App', 'Access at: https://banking-app-a6b8a.web.app'],
+            ['Mobile Apps', 'Collector App (Android) for field agents. Customer App (Android) for customers to view accounts.'],
+            ['Key Features', 'Customer & KYC management, Account opening, Teller transactions, Loan origination & repayment, HP agreements, Field collections, GL with double-entry, Approval workflows, Auto-backup, Role-based access control.'],
+          ]
+        },
+        {
+          title: '2. Login & Access',
+          content: [
+            ['Web Login', 'Go to the web app URL. Enter your Email and Password. Click Sign In.'],
+            ['Default Admin', 'Email: admin@majupat.com | Password: admin123'],
+            ['Default Teller', 'Email: teller@majupat.com | Password: teller123'],
+            ['Security', 'Change default passwords immediately after first login via Settings → Users.'],
+            ['Forgot Password', 'Contact your system administrator to reset via the Users management page.'],
+          ]
+        },
+        {
+          title: '3. Dashboard',
+          content: [
+            ['Overview', 'The dashboard shows real-time business metrics: Total Customers, Active Accounts, Total Deposits, Active Loans, Loan Book, Overdue Loans, Today\'s Collections, Pending Approvals.'],
+            ['Auto-Refresh', 'Data refreshes every 2 seconds automatically and updates instantly on any transaction.'],
+            ['Charts', 'Transaction volume over time, loan portfolio breakdown, collection performance by collector.'],
+          ]
+        },
+        {
+          title: '4. Customer Management',
+          content: [
+            ['View Customers', 'Menu: Customers. Search by name, phone, or Ghana Card. Filter by KYC status.'],
+            ['Add Customer', 'Click New Customer. Fill in Full Name (required), Phone (required), Ghana Card, DOB, Address, Occupation, Employer, Monthly Income. Click Save.'],
+            ['KYC Status', 'Pending = not verified. Verified = identity confirmed. Rejected = failed verification.'],
+            ['Customer Detail', 'Click any customer to see all accounts, loans, HP agreements, and transaction history.'],
+            ['App Credentials', 'Set App Username and App Password in customer detail to give access to the Customer Mobile App.'],
+          ]
+        },
+        {
+          title: '5. Account Management',
+          content: [
+            ['Account Types', 'Savings, Current, Fixed Deposit, Hire Purchase, Joint.'],
+            ['Open Account', 'Menu: Accounts → Open Account. Search customer, select type and product, enter initial deposit, click Submit.'],
+            ['Account 360°', 'Full customer view: all accounts, balances, loans, HP agreements, recent transactions. Can apply balance to offset a loan.'],
+            ['Account Status', 'Active (normal), Dormant (inactive), Frozen (blocked), Closed (permanently closed).'],
+          ]
+        },
+        {
+          title: '6. Teller Operations',
+          content: [
+            ['Post Credit', 'Search account → select → enter amount → select Credit → enter narration → Post Transaction.'],
+            ['Post Debit', 'Search account → select → enter amount → select Debit → enter narration → Post Transaction.'],
+            ['Fund Transfer', 'Search source account → enter amount → search destination → enter narration → Transfer.'],
+            ['Approval Threshold', 'Amounts above the configured threshold go to Pending Approvals instead of posting immediately.'],
+            ['Reverse Transaction', 'Admin/Manager only. Go to Transaction History → find transaction → click Reverse → enter reason → Confirm.'],
+          ]
+        },
+        {
+          title: '7. Transaction History & Statements',
+          content: [
+            ['History', 'Menu: Transactions → History. Search, filter by type/date, export CSV or PDF, view details, reverse (admin only).'],
+            ['Statement', 'Menu: Transactions → Statement. Search account, select period, click Generate Statement. Shows opening/closing balance, full transaction list, loan summary, HP summary. Export: Print, CSV, PDF.'],
+          ]
+        },
+        {
+          title: '8. Pending Approvals',
+          content: [
+            ['What Appears', 'Transactions above threshold, account opening requests from collectors, loan applications.'],
+            ['Approve', 'Review details → click Approve (green). Item processes immediately.'],
+            ['Reject', 'Click Reject (red) → enter reason → Confirm Rejection. Submitter is notified.'],
+          ]
+        },
+        {
+          title: '9. Loans',
+          content: [
+            ['Loan Types', 'Personal, Micro, Mortgage, Emergency, Group, Hire Purchase.'],
+            ['Apply', 'Menu: Loans → New Loan. Select customer, account, product, enter amount, tenure, rate. Choose Amortization or Flat Rate method. Click Submit.'],
+            ['Repayment', 'From Loans list → click $ button → enter amount → Record Repayment. Reduces loans.outstanding. Marks Completed when zero.'],
+            ['Status', 'Pending → Active → Overdue → Completed (or Rejected).'],
+            ['Calculator', 'Menu: Loans → Calculator. Calculate repayments before creating a loan.'],
+          ]
+        },
+        {
+          title: '10. Hire Purchase (HP)',
+          content: [
+            ['Items Catalogue', 'Menu: HP → Items. Add items with name, price, daily/weekly payment, stock.'],
+            ['Create Agreement', 'Menu: HP → Agreements → New. Select customer, item, frequency, down payment. Optionally generate linked loan with interest rate and tenure.'],
+            ['Record Payment', 'From Agreements list → click Pay → enter amount → Record Payment. Updates total_paid, remaining, and linked loan outstanding.'],
+            ['Payment History', 'HP → Agreements → Payment History tab shows all payments with collector and remaining balance.'],
+          ]
+        },
+        {
+          title: '11. Collectors & Field Collections',
+          content: [
+            ['Add Collector', 'Menu: Collectors → New Collector. Enter name, phone, zone, username, password.'],
+            ['Collection Report', 'Menu: Collectors → Collection Report. View by collector, date range, payment type. Export PDF.'],
+            ['Mobile App', 'Collectors use the Android Collector App with their username/password to record field collections.'],
+          ]
+        },
+        {
+          title: '12. Reports',
+          content: [
+            ['Summary Report', 'Overview: deposits, withdrawals, loans, collections. Period filters: Today, Week, Month, Custom.'],
+            ['Teller Report', 'Daily teller performance: transactions per teller, totals, session summary.'],
+            ['Collection Report', 'Field collections by collector, payment type, date range. Export PDF.'],
+            ['Export', 'All reports support PDF and CSV export.'],
+          ]
+        },
+        {
+          title: '13. General Ledger (GL)',
+          content: [
+            ['Chart of Accounts', '1000-1999: Assets | 2000-2999: Liabilities | 3000-3999: Equity | 4000-4999: Revenue | 5000-5999: Expenses.'],
+            ['Post Journal Entry', 'GL → Post Entry. Select debit account, credit account, enter amount and narration. May require approval.'],
+            ['End of Day', 'GL → End of Day. Reconcile transactions, generate daily GL summary, close the day.'],
+          ]
+        },
+        {
+          title: '14. Products & HP Items',
+          content: [
+            ['Bank Products', 'Menu: Products. Define terms for accounts and loans: interest rate, min balance, monthly fee, tenure, benefits.'],
+            ['HP Items', 'Menu: HP → Items. Manage goods catalogue with price, daily/weekly payment amounts, stock levels.'],
+          ]
+        },
+        {
+          title: '15. User Management',
+          content: [
+            ['Add User', 'Menu: Users → New User. Enter name, email, password, role, phone. Click Save.'],
+            ['Edit User', 'Click Edit icon. Leave password blank to keep current. Click Save.'],
+            ['Roles', 'Admin: full access. Manager: all ops except users/settings. Teller: transactions & accounts. Collector: mobile app only. Viewer: read-only.'],
+            ['Deactivate', 'Set Status to Inactive to block login without deleting the account.'],
+          ]
+        },
+        {
+          title: '16. Settings & Backups',
+          content: [
+            ['Approval Rules', 'Settings → Approval Rules. Configure which operations require approval, threshold amounts, and which roles are affected.'],
+            ['Auto-Backup', 'Saves all data to database every 30 minutes (configurable) while admin is logged in.'],
+            ['Auto-Download', 'Downloads ZIP backup to your computer every 10 days (configurable).'],
+            ['Backup Schedule', 'Settings → Backups → Backup Schedule Settings. Set interval in minutes and download interval in days. Click Save Schedule.'],
+            ['Export Backup', 'Each backup can be exported as CSV (ZIP), Excel (XLSX), or PDF (full detail with all table data).'],
+            ['Restore', 'Click Restore on any backup to roll back all data to that point.'],
+            ['Delete Backup', 'Click the red trash icon on any backup row to delete it permanently.'],
+            ['Clear All Data', 'Settings → Data Management → Clear All Data. Enter your admin login password. Two-step confirmation required.'],
+          ]
+        },
+        {
+          title: '17. Collector Mobile App',
+          content: [
+            ['Login', 'Enter username and password set by admin in the web system.'],
+            ['Record Collection', 'Collect tab → search account → select → choose type (Savings/Loan/HP) → enter amount → Post.'],
+            ['Savings', 'Increases account balance. Posts credit transaction.'],
+            ['Loan', 'Reduces loans.outstanding. Posts debit transaction.'],
+            ['HP', 'Reduces hp_agreements.remaining and linked loan outstanding. Posts debit transaction.'],
+            ['Reports', 'View collection history with date range filter. Export PDF.'],
+          ]
+        },
+        {
+          title: '18. Customer Mobile App',
+          content: [
+            ['Login', 'Use App Username and App Password set by admin/teller in the web system.'],
+            ['Home', 'Total portfolio balance, today\'s credits/debits, quick actions, overdue loan alerts, recent transactions.'],
+            ['Accounts', 'View all active accounts and balances.'],
+            ['Loans', 'View active/overdue loans, outstanding balance, monthly payment, next due date.'],
+            ['History', 'Full transaction history with date filter.'],
+          ]
+        },
+        {
+          title: '19. Roles & Permissions',
+          content: [
+            ['Admin', 'Full access: all operations, user management, settings, backup, data management.'],
+            ['Manager', 'All operations except user management and system settings. Can approve transactions.'],
+            ['Teller', 'Post transactions, view accounts, generate statements. Subject to approval rules.'],
+            ['Collector', 'Mobile app only. Record field collections.'],
+            ['Viewer', 'Read-only access to reports and dashboards.'],
+          ]
+        },
+        {
+          title: '20. Troubleshooting',
+          content: [
+            ['Cannot Login', 'Check email/password. Ensure account is Active. Clear browser cache (Ctrl+Shift+R).'],
+            ['Transaction Not Posting', 'Check if amount exceeds approval threshold (check Pending Approvals). Ensure account is Active.'],
+            ['Loan Not Reducing', 'Loan must be Active or Overdue status. Verify loan is linked to the correct account/customer.'],
+            ['HP Not Updating', 'HP agreement must be Active status and linked to the correct customer.'],
+            ['Collector App Error', 'Check internet connection. Verify loan/HP agreement is Active in the web system.'],
+            ['Clear All Password', 'Use your admin login password (same as web app sign-in). Case-sensitive.'],
+            ['Backup Not Working', 'Ensure backups table exists in Supabase. Must be logged in as Admin or Manager.'],
+          ]
+        },
+      ];
+
+      for (const section of sections) {
+        doc.addPage();
+        addPageHeader(section.title);
+        let y = 24;
+        y = addSection(section.title, y);
+
+        for (const [label, text] of section.content) {
+          y = checkPage(doc, y, 18);
+          doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+          doc.setTextColor(30, 64, 175);
+          doc.text(label + ':', M, y);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(15, 23, 42);
+          const lines = doc.splitTextToSize(text, W - M - 50);
+          doc.text(lines, M + 42, y);
+          y += Math.max(lines.length * 4.5, 6) + 3;
+        }
+      }
+
+      // Footer on all pages
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Page ${i} of ${pageCount}`, W - M, 290, { align: 'right' });
+        doc.text('Majupat Love Enterprise — Confidential', M, 290);
+      }
+
+      doc.save('Majupat-Love-User-Guide.pdf');
+      showMsg('User guide downloaded successfully.', 'success');
+    } catch (e) {
+      showMsg('Failed to generate guide: ' + e.message, 'error');
+    }
+    setGeneratingGuide(false);
+  };
+
   const handleDownloadAll = async () => {
     setDownloading(true);
     try {
@@ -481,6 +806,9 @@ export default function Settings() {
                       <div className="card-subtitle">Build & environment details</div>
                     </div>
                   </div>
+                  <button className="btn btn-primary btn-sm" onClick={handleDownloadUserGuide} disabled={generatingGuide}>
+                    <Download size={13} />{generatingGuide ? 'Generating…' : 'Download User Guide PDF'}
+                  </button>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   {[
