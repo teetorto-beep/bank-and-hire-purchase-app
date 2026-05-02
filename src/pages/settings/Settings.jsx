@@ -155,14 +155,14 @@ export default function Settings() {
       setClearAllError('Please enter your password.');
       return;
     }
-    // Verify against the admin's actual password in the database
-    const { data, error } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', user?.id)
-      .eq('password', clearAllPass.trim())
-      .single();
-    if (error || !data) {
+    // Compare directly against the stored session password
+    // The user object in sessionStorage contains the password field
+    const storedUser = authDB.currentUser();
+    if (!storedUser) {
+      setClearAllError('Session expired. Please log in again.');
+      return;
+    }
+    if (clearAllPass.trim() !== storedUser.password) {
       setClearAllError('Incorrect password. Please try again.');
       return;
     }
