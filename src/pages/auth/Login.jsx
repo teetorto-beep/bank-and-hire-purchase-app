@@ -146,19 +146,6 @@ export default function Login({ onLogin }) {
                   {loginLoading ? 'Signing in…' : 'Sign In'}
                 </button>
               </form>
-
-              {/* Quick fill demo */}
-              <div style={{ marginTop: 24, padding: 14, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Quick Demo Login</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button className="btn btn-secondary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setLoginForm({ email: 'admin@majupat.com', password: 'password123' })}>
-                    <Shield size={11} />Admin
-                  </button>
-                  <button className="btn btn-secondary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setLoginForm({ email: 'teller@majupat.com', password: 'password123' })}>
-                    <User size={11} />Teller
-                  </button>
-                </div>
-              </div>
             </>
           )}
 
