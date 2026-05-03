@@ -34,8 +34,8 @@ set session_replication_role = default;
 
 -- Re-insert seed data
 insert into users (id, name, email, password, role) values
-  ('00000000-0000-0000-0000-000000000001', 'Admin User', 'admin@majupat.com',  'admin123',  'admin'),
-  ('00000000-0000-0000-0000-000000000002', 'Teller One', 'teller@majupat.com', 'teller123', 'teller')
+  ('00000000-0000-0000-0000-000000000001', 'Admin User', 'admin@majupat.com',  'password123', 'admin'),
+  ('00000000-0000-0000-0000-000000000002', 'Teller One', 'teller@majupat.com', 'password123', 'teller')
 on conflict (email) do nothing;
 
 insert into system_settings (key, value) values (

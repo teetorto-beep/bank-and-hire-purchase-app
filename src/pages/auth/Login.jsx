@@ -104,28 +104,15 @@ export default function Login({ onLogin }) {
       <div className="login-right">
         <div className="login-box">
 
-          {/* Tab switcher */}
-          <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 10, padding: 4, marginBottom: 28, border: '1px solid var(--border)' }}>
-            {[['login', 'Sign In'], ['signup', 'Create Account']].map(([key, label]) => (
-              <button key={key} onClick={() => { setMode(key); setLoginError(''); setSignupError(''); }}
-                style={{ flex: 1, padding: '9px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, transition: 'all .15s',
-                  background: mode === key ? 'var(--brand)' : 'transparent',
-                  color: mode === key ? '#fff' : 'var(--text-3)',
-                  boxShadow: mode === key ? '0 2px 8px rgba(26,86,219,0.3)' : 'none',
-                }}>
-                {label}
-              </button>
-            ))}
+          {/* Tab switcher — Sign In only, no public signup */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>Welcome back</div>
+            <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>Sign in to your account to continue</div>
           </div>
 
           {/* ── SIGN IN ── */}
           {mode === 'login' && (
             <>
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>Welcome back</div>
-                <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>Sign in to your account to continue</div>
-              </div>
-
               {loginError && (
                 <div className="alert alert-error" style={{ marginBottom: 16 }}>
                   <Lock size={13} />{loginError}
@@ -164,10 +151,10 @@ export default function Login({ onLogin }) {
               <div style={{ marginTop: 24, padding: 14, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Quick Demo Login</div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button className="btn btn-secondary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setLoginForm({ email: 'admin@majupat.com', password: 'admin123' })}>
+                  <button className="btn btn-secondary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setLoginForm({ email: 'admin@majupat.com', password: 'password123' })}>
                     <Shield size={11} />Admin
                   </button>
-                  <button className="btn btn-secondary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setLoginForm({ email: 'teller@majupat.com', password: 'teller123' })}>
+                  <button className="btn btn-secondary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setLoginForm({ email: 'teller@majupat.com', password: 'password123' })}>
                     <User size={11} />Teller
                   </button>
                 </div>
@@ -175,109 +162,7 @@ export default function Login({ onLogin }) {
             </>
           )}
 
-          {/* ── SIGN UP ── */}
-          {mode === 'signup' && (
-            <>
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)' }}>Create Account</div>
-                <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>Register a new staff account</div>
-              </div>
-
-              {signupError && (
-                <div className="alert alert-error" style={{ marginBottom: 16 }}>
-                  <Lock size={13} />{signupError}
-                </div>
-              )}
-
-              <form onSubmit={handleSignup}>
-                <div className="form-group">
-                  <label className="form-label">Full Name <span className="required">*</span></label>
-                  <div style={{ position: 'relative' }}>
-                    <User size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-                    <input className="form-control" placeholder="Kwame Asante" value={signupForm.name} onChange={sf('name')} required style={{ paddingLeft: 34 }} />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Email Address <span className="required">*</span></label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-                    <input className="form-control" type="email" placeholder="you@majupat.com" value={signupForm.email} onChange={sf('email')} required style={{ paddingLeft: 34 }} />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Phone Number</label>
-                  <div style={{ position: 'relative' }}>
-                    <Phone size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-                    <input className="form-control" placeholder="0551234567" value={signupForm.phone} onChange={sf('phone')} style={{ paddingLeft: 34 }} />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Role</label>
-                  <select className="form-control" value={signupForm.role} onChange={sf('role')}>
-                    <option value="teller">Teller</option>
-                    <option value="collector">Collector</option>
-                    <option value="viewer">Viewer (Read-only)</option>
-                    <option value="manager">Manager</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                  <div className="form-hint">Admin accounts should be created by an existing admin via User Management</div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Password <span className="required">*</span></label>
-                  <div style={{ position: 'relative' }}>
-                    <Lock size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-                    <input className="form-control" type={showSignupPass ? 'text' : 'password'} placeholder="Min 6 characters"
-                      value={signupForm.password} onChange={sf('password')} required style={{ paddingLeft: 34, paddingRight: 40 }} />
-                    <button type="button" onClick={() => setShowSignupPass(p => !p)}
-                      style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
-                      {showSignupPass ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                  {/* Password strength indicator */}
-                  {signupForm.password && (
-                    <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                      {[1,2,3,4].map(i => (
-                        <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: signupForm.password.length >= i * 3 ? (signupForm.password.length >= 10 ? 'var(--green)' : signupForm.password.length >= 6 ? 'var(--yellow)' : 'var(--red)') : 'var(--border)' }} />
-                      ))}
-                      <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 4 }}>
-                        {signupForm.password.length < 6 ? 'Weak' : signupForm.password.length < 10 ? 'Fair' : 'Strong'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Confirm Password <span className="required">*</span></label>
-                  <div style={{ position: 'relative' }}>
-                    <Lock size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-                    <input className="form-control" type="password" placeholder="Re-enter password"
-                      value={signupForm.confirmPassword} onChange={sf('confirmPassword')} required style={{ paddingLeft: 34 }} />
-                  </div>
-                  {signupForm.confirmPassword && signupForm.password !== signupForm.confirmPassword && (
-                    <div className="form-error">Passwords do not match</div>
-                  )}
-                  {signupForm.confirmPassword && signupForm.password === signupForm.confirmPassword && (
-                    <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>✓ Passwords match</div>
-                  )}
-                </div>
-
-                <button className="btn btn-primary btn-lg" type="submit" disabled={signupLoading} style={{ width: '100%', marginTop: 4 }}>
-                  {signupLoading ? 'Creating account…' : 'Create Account'}
-                </button>
-              </form>
-
-              <div style={{ marginTop: 16, textAlign: 'center', fontSize: 12, color: 'var(--text-3)' }}>
-                Already have an account?{' '}
-                <button onClick={() => setMode('login')} style={{ background: 'none', border: 'none', color: 'var(--brand)', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}>
-                  Sign in
-                </button>
-              </div>
-            </>
-          )}
+          {/* Signup disabled — use User Management to create accounts */}
         </div>
       </div>
     </div>

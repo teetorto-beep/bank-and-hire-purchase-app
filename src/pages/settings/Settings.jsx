@@ -222,8 +222,8 @@ export default function Settings() {
 
       // Re-insert default admin + teller
       await supabase.from('users').upsert([
-        { id:'00000000-0000-0000-0000-000000000001', name:'Admin User', email:'admin@majupat.com',  password:'admin123',  role:'admin'  },
-        { id:'00000000-0000-0000-0000-000000000002', name:'Teller One', email:'teller@majupat.com', password:'teller123', role:'teller' },
+        { id:'00000000-0000-0000-0000-000000000001', name:'Admin User', email:'admin@majupat.com',  password:'password123', role:'admin'  },
+        { id:'00000000-0000-0000-0000-000000000002', name:'Teller One', email:'teller@majupat.com', password:'password123', role:'teller' },
       ], { onConflict:'email' });
 
       // Re-insert system settings
@@ -395,8 +395,8 @@ export default function Settings() {
           title: '2. Login & Access',
           content: [
             ['Web Login', 'Go to the web app URL. Enter your Email and Password. Click Sign In.'],
-            ['Default Admin', 'Email: admin@majupat.com | Password: admin123'],
-            ['Default Teller', 'Email: teller@majupat.com | Password: teller123'],
+            ['Default Admin', 'Email: admin@majupat.com | Password: password123'],
+            ['Default Teller', 'Email: teller@majupat.com | Password: password123'],
             ['Security', 'Change default passwords immediately after first login via Settings > Users.'],
             ['Forgot Password', 'Contact your system administrator to reset via the Users management page.'],
           ]
