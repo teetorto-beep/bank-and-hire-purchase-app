@@ -155,7 +155,22 @@ export default function HPItems() {
           <div className="page-desc">Physical goods offered on hire purchase — TVs, fridges, phones and more</div>
         </div>
         <div className="page-header-right">
-          <button className="btn btn-secondary" onClick={() => exportCSV(hpItems.map(i => ({ Name: i.name, Category: i.category, Description: i.description, Price: i.price, Stock: i.stock, Daily: i.dailyPayment, Weekly: i.weeklyPayment, Created: fmtDT(i.created_at), Updated: fmtDT(i.updated_at) })), 'hp-catalogue')}>
+          <button className="btn btn-secondary" onClick={() => {
+            if (!hpItems || hpItems.length === 0) { alert('No items to export.'); return; }
+            exportCSV(hpItems.map(i => ({
+              Name:        i.name        || '',
+              Category:    i.category    || '',
+              Description: i.description || '',
+              Price:       i.price       || 0,
+              Stock:       i.stock       ?? 0,
+              'Daily Payment':  i.dailyPayment  || i.daily_payment  || 0,
+              'Weekly Payment': i.weeklyPayment || i.weekly_payment || 0,
+              Image:       i.image       || '',
+              Status:      i.status      || '',
+              Created:     fmtDT(i.created_at || i.createdAt),
+              Updated:     fmtDT(i.updated_at || i.updatedAt),
+            })), 'hp-catalogue-' + new Date().toISOString().slice(0, 10));
+          }}>
             <Download size={14} />CSV
           </button>
           <button className="btn btn-secondary" onClick={() => exportHPCataloguePDF(hpItems)}>
