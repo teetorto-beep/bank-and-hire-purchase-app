@@ -212,11 +212,13 @@ export const accountsDB = {
     const { data: accNum, error: rpcErr } = await supabase.rpc('generate_account_number');
     if (rpcErr) return { data: null, error: rpcErr };
 
+    const initDeposit = Number(payload.initialDeposit ?? payload.initial_deposit ?? 0);
+
     const row = clean({
       customer_id: payload.customerId || payload.customer_id,
       type: payload.type,
       interest_rate: payload.interestRate ?? payload.interest_rate ?? 0,
-      balance: payload.initialDeposit ?? payload.initial_deposit ?? 0,
+      balance: 0,          // always start at 0 — the transaction post below sets the real balance
       status: 'active',
       opened_by: userId,
       account_number: accNum,
@@ -225,8 +227,7 @@ export const accountsDB = {
     const { data, error } = await supabase.from('accounts').insert(row).select().single();
     if (!error && data) {
       await audit('OPEN_ACCOUNT', 'accounts', data.id, userId, userName, `${data.account_number} - ${data.type}`);
-      // Post initial deposit if provided
-      const initDeposit = payload.initialDeposit ?? payload.initial_deposit ?? 0;
+      // Post initial deposit as a transaction — this sets the balance correctly
       if (initDeposit > 0) {
         await transactionsDB.post(
           {
