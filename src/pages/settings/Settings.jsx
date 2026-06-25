@@ -121,14 +121,56 @@ export default function Settings() {
     if (!confirmClear) return;
     setClearing(true);
     try {
+      // Delete deepest children first to avoid FK violations
+      // Map every parent table to ALL tables that reference it (directly or indirectly)
+      const childMap = {
+        transactions:   [],
+        hp_payments:    [],
+        hp_loan_items:  [],
+        product_assignments: [],
+        deduction_rules: [],
+        gl_entries:     [],
+        audit_log:      [],
+        collections:    [],
+        collector_assignments: [],
+        pending_approvals: [],
+        pending_transactions: [],
+        notifications:  [],
+        loans:          ['hp_loan_items', 'deduction_rules'],
+        hp_agreements:  ['hp_loan_items', 'hp_payments'],
+        accounts:       ['hp_loan_items', 'product_assignments', 'deduction_rules', 'transactions', 'pending_transactions', 'collections', 'notifications'],
+        customers:      ['hp_loan_items', 'product_assignments', 'collector_assignments', 'collections', 'notifications', 'pending_approvals'],
+        hp_items:       ['hp_loan_items'],
+        products:       ['product_assignments'],
+        gl_accounts:    ['gl_entries'],
+        collectors:     ['collector_assignments', 'collections'],
+      };
+
+      // Delete children first
+      const children = childMap[confirmClear.key] || [];
+
+      // Break circular FK between loans ↔ hp_agreements before deleting either
+      if (confirmClear.key === 'loans' || confirmClear.key === 'hp_agreements') {
+        await supabase.from('loans').update({ hp_agreement_id: null }).not('id', 'is', null);
+        await supabase.from('hp_agreements').update({ loan_id: null }).not('id', 'is', null);
+      }
+
+      for (const child of children) {
+        const { error: ce } = await supabase.from(child).delete().not('id', 'is', null);
+        if (ce) console.warn(`Clear child ${child}:`, ce.message);
+      }
+
+      // Now delete the table itself
       const { error } = await supabase
         .from(confirmClear.key)
         .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000');
-      if (error) showMsg(`Failed: ${error.message}`, 'error');
-      else {
+        .not('id', 'is', null);
+
+      if (error) {
+        showMsg(`Failed: ${error.message}`, 'error');
+      } else {
         showMsg(`${confirmClear.label} cleared.`);
-        setTableCounts(p => ({ ...p, [confirmClear.key]: 0 }));
+        await loadCounts();
         // Re-seed GL accounts if they were cleared
         if (confirmClear.key === 'gl_accounts') {
           const glAccounts = [
@@ -180,9 +222,17 @@ export default function Settings() {
   const handleClearAllConfirm = async () => {
     setClearingAll(true);
     try {
-      // Delete all rows using neq on id (matches everything)
-      // Order: children before parents to avoid FK violations
+      // ── Step 1: Break circular FK between loans ↔ hp_agreements ──────────
+      // loans.hp_agreement_id → hp_agreements.id
+      // hp_agreements.loan_id → loans.id
+      // Neither can be deleted while the other exists, so null both sides first
+      await supabase.from('loans').update({ hp_agreement_id: null }).not('id', 'is', null);
+      await supabase.from('hp_agreements').update({ loan_id: null }).not('id', 'is', null);
+
+      // ── Step 2: Delete in correct dependency order ────────────────────────
       const tables = [
+        'hp_loan_items',
+        'product_assignments',
         'gl_entries',
         'audit_log',
         'deduction_rules',
@@ -206,14 +256,14 @@ export default function Settings() {
       for (const tbl of tables) {
         const { error } = await supabase.from(tbl)
           .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000');
+          .not('id', 'is', null);
         if (error) console.warn(`Clear ${tbl}:`, error.message);
       }
 
-      // Delete all users except keep none (we'll re-insert defaults)
+      // Delete all users
       await supabase.from('users')
         .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000');
+        .not('id', 'is', null);
 
       // Delete system_settings (uses text PK)
       await supabase.from('system_settings')

@@ -2,8 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import Badge from '../../components/ui/Badge';
+import Modal from '../../components/ui/Modal';
 import { Search, Plus, CreditCard, ArrowRightLeft, AlertTriangle, ShoppingBag } from 'lucide-react';
 import { authDB } from '../../core/db';
+import { accountTypeLabel } from '../../core/normalize';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
@@ -17,84 +19,53 @@ export default function Account360() {
   const [offsetMsg, setOffsetMsg] = useState('');
   const [offsetting, setOffsetting] = useState(null);
 
-  const doSearch = () => {
-    setSearched(true);
-    const q = search.trim().toLowerCase();
-    if (!q) return;
+  // ── Offset modal state ────────────────────────────────────────────────────
+  const [offsetModal, setOffsetModal] = useState(null); // { account, loan }
+  const [offsetAmt, setOffsetAmt] = useState('');
+  const [offsetSaving, setOffsetSaving] = useState(false);
 
-    // Search by account number
-    let acc = accounts.find(a =>
-      (a.accountNumber || '').toLowerCase() === q ||
-      (a.accountNumber || '').toLowerCase().includes(q)
-    );
-
-    // Search by customer name, phone, or Ghana Card
-    if (!acc) {
-      const cust = customers.find(c =>
-        (c.phone || '') === q ||
-        (c.name || '').toLowerCase().includes(q) ||
-        (c.ghanaCard || '').toLowerCase() === q
-      );
-      if (cust) acc = accounts.find(a => a.customerId === cust.id);
-    }
-
-    if (!acc) { setResult(null); return; }
-
-    const customer = customers.find(c => c.id === acc.customerId) || acc.customer;
-    const allCustAccounts = accounts.filter(a => a.customerId === acc.customerId);
-    const custTxns = transactions
-      .filter(t => allCustAccounts.some(a => a.id === (t.accountId || t.account_id)))
-      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    const custLoans = loans.filter(l => l.customerId === acc.customerId);
-    const custAgreements = hpAgreements.filter(a => a.customerId === acc.customerId).map(a => ({
-      ...a,
-      item: a.item || hpItems.find(i => i.id === a.itemId),
-      loan: a.loan || loans.find(l => l.id === a.loanId),
-      progress: a.totalPrice > 0 ? Math.min(100, ((a.totalPaid || 0) / a.totalPrice) * 100) : 0,
-    }));
-    const custRules = deductionRules.filter(r =>
-      allCustAccounts.some(a => a.id === (r.account_id || r.accountId))
-    );
-    setResult({ acc, customer, allCustAccounts, custTxns, custLoans, custAgreements, custRules });
+  const openOffsetModal = (account, loan) => {
+    setOffsetAmt(String(Math.min(Number(account.balance), Number(loan.outstanding))));
+    setOffsetModal({ account, loan });
+    setOffsetMsg('');
   };
 
-  // ── Apply account balance to offset a loan ────────────────────────────────
-  const doOffset = async (account, loan) => {
+  const doOffset = async () => {
+    if (!offsetModal) return;
+    const { account, loan } = offsetModal;
+    const amt = parseFloat(offsetAmt) || 0;
     const balance = Number(account.balance || 0);
     const outstanding = Number(loan.outstanding || 0);
-    if (balance <= 0) { setOffsetMsg('Account has no balance to apply.'); return; }
-    if (outstanding <= 0) { setOffsetMsg('Loan is already fully paid.'); return; }
+    if (amt <= 0) { setOffsetMsg('Enter a valid amount.'); return; }
+    if (amt > balance) { setOffsetMsg(`Cannot exceed account balance of ${GHS(balance)}.`); return; }
+    if (amt > outstanding) { setOffsetMsg(`Cannot exceed loan outstanding of ${GHS(outstanding)}.`); return; }
 
-    const applyAmt = Math.min(balance, outstanding);
-    const confirm = window.confirm(
-      `Apply ${GHS(applyAmt)} from account ${account.accountNumber} to offset ${loan.type?.replace(/_/g,' ')} loan?\n\n` +
-      `Account balance: ${GHS(balance)}\nLoan outstanding: ${GHS(outstanding)}\nAmount to apply: ${GHS(applyAmt)}`
-    );
-    if (!confirm) return;
-
-    setOffsetting(loan.id);
-    setOffsetMsg('');
+    setOffsetSaving(true); setOffsetMsg('');
     try {
       const { error } = await postTransaction({
         accountId: account.id,
         account_id: account.id,
         type: 'debit',
-        amount: applyAmt,
-        narration: `Loan offset — ${loan.type?.replace(/_/g,' ')} (from account balance)`,
+        amount: amt,
+        narration: `Savings offset — ${loan.type?.replace(/_/g,' ')} loan repayment`,
         channel: 'teller',
         loan_id: loan.id,
       });
       if (error) { setOffsetMsg('Error: ' + error.message); }
       else {
-        setOffsetMsg(`✅ ${GHS(applyAmt)} applied to loan. Outstanding reduced to ${GHS(Math.max(0, outstanding - applyAmt))}.`);
-        // Re-fetch fresh data directly from Supabase — bypass stale context
+        setOffsetModal(null);
+        setOffsetAmt('');
+        setOffsetMsg(`✅ ${GHS(amt)} applied. Loan outstanding reduced to ${GHS(Math.max(0, outstanding - amt))}.`);
         await doSearchFresh();
       }
     } catch (e) { setOffsetMsg('Error: ' + e.message); }
-    setOffsetting(null);
+    setOffsetSaving(false);
   };
 
-  // ── Fresh search — reads directly from Supabase, not context cache ────────
+  const doSearch = () => {
+    setSearched(true);
+    doSearchFresh();
+  };
   const doSearchFresh = async () => {
     const q = search.trim().toLowerCase();
     if (!q) return;
@@ -250,24 +221,30 @@ export default function Account360() {
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
               Accounts ({result.allCustAccounts.length})
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
               {result.allCustAccounts.map(a => {
-                // Net position = savings balance minus any loan outstanding on this account
-                const linkedLoans = result.custLoans.filter(l =>
-                  (l.accountId === a.id) && (l.status === 'active' || l.status === 'overdue')
+                // All active/overdue loans for this customer (any account)
+                const allActiveLoans = result.custLoans.filter(l =>
+                  l.status === 'active' || l.status === 'overdue'
                 );
+                // Loans directly linked to THIS account
+                const linkedLoans = allActiveLoans.filter(l => l.accountId === a.id);
                 const loanOutstanding = linkedLoans.reduce((s, l) => s + Number(l.outstanding || 0), 0);
                 const netPosition = Number(a.balance) - loanOutstanding;
-                const hasLoan = loanOutstanding > 0;
+                const hasLinkedLoan = linkedLoans.length > 0;
+                // Can offset if account has balance AND there are any active loans customer-wide
+                const canOffset = Number(a.balance) > 0 && allActiveLoans.length > 0;
+
                 return (
                 <div key={a.id} style={{ padding: 16, border: `2px solid ${a.id === result.acc.id ? 'var(--brand)' : 'var(--border)'}`, borderRadius: 10, background: a.id === result.acc.id ? 'var(--brand-light)' : 'var(--surface)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-3)' }}>{a.type?.replace('_', ' ')}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-3)' }}>{accountTypeLabel(a, accounts)}</span>
                     <Badge status={a.status} />
                   </div>
                   <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14 }}>{a.accountNumber}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, marginTop: 8, color: a.balance < 0 ? 'var(--red)' : 'var(--text)' }}>{GHS(a.balance)}</div>
-                  {hasLoan && (
+
+                  {hasLinkedLoan && (
                     <>
                       <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 4, fontWeight: 700 }}>
                         − {GHS(loanOutstanding)} loan outstanding
@@ -278,29 +255,42 @@ export default function Account360() {
                           {netPosition < 0 ? '-' : ''}{GHS(Math.abs(netPosition))}
                         </div>
                       </div>
-                      {/* ── Offset button ── */}
-                      {Number(a.balance) > 0 && linkedLoans.length > 0 && (
-                        <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>
-                            Apply balance to offset loan:
-                          </div>
-                          {linkedLoans.map(loan => (
-                            <button
-                              key={loan.id}
-                              className="btn btn-primary btn-sm"
-                              style={{ width: '100%', marginBottom: 4, fontSize: 11 }}
-                              disabled={offsetting === loan.id}
-                              onClick={() => doOffset(a, loan)}
-                            >
-                              <ArrowRightLeft size={12} />
-                              {offsetting === loan.id ? 'Applying…' : `Apply ${GHS(Math.min(Number(a.balance), Number(loan.outstanding)))} → ${loan.type?.replace(/_/g,' ')}`}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </>
                   )}
-                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>{a.interestRate}% p.a.</div>
+
+                  {/* ── Use this account's balance to offset ANY customer loan ── */}
+                  {canOffset && (
+                    <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, marginBottom: 6 }}>
+                        💰 Use balance to offset debt:
+                      </div>
+                      {allActiveLoans.map(loan => (
+                        <button
+                          key={loan.id}
+                          className="btn btn-sm"
+                          style={{
+                            width: '100%', marginBottom: 4, fontSize: 11,
+                            background: loan.accountId === a.id ? 'var(--brand)' : 'var(--surface-2)',
+                            color: loan.accountId === a.id ? '#fff' : 'var(--text)',
+                            border: `1px solid ${loan.accountId === a.id ? 'var(--brand)' : 'var(--border)'}`,
+                            borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                          }}
+                          onClick={() => openOffsetModal(a, loan)}
+                        >
+                          <ArrowRightLeft size={11} />
+                          <span style={{ flex: 1, textAlign: 'left' }}>
+                            {loan.type?.replace(/_/g, ' ')} {loan.itemName ? `(${loan.itemName})` : ''}
+                          </span>
+                          <span style={{ fontWeight: 700, color: loan.accountId === a.id ? '#fff' : 'var(--red)' }}>
+                            {GHS(loan.outstanding)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>{a.interestRate}% p.a.</div>
                 </div>
                 );
               })}
@@ -424,6 +414,73 @@ export default function Account360() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Savings Offset Modal ────────────────────────────────────────── */}
+      {offsetModal && (
+        <Modal
+          open={!!offsetModal}
+          onClose={() => { setOffsetModal(null); setOffsetAmt(''); setOffsetMsg(''); }}
+          title="Use Savings to Offset Debt"
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => { setOffsetModal(null); setOffsetAmt(''); setOffsetMsg(''); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={doOffset} disabled={offsetSaving}>
+                {offsetSaving ? 'Applying…' : 'Confirm Offset'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* From account */}
+            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>From Account (Savings)</div>
+              <div style={{ fontFamily: 'monospace', fontWeight: 700 }}>{offsetModal.account.accountNumber}</div>
+              <div style={{ fontSize: 13, marginTop: 2 }}>Available balance: <strong style={{ color: 'var(--green)' }}>{GHS(offsetModal.account.balance)}</strong></div>
+            </div>
+            {/* To loan */}
+            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>To Loan</div>
+              <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{offsetModal.loan.type?.replace(/_/g, ' ')}</div>
+              <div style={{ fontSize: 13, marginTop: 2 }}>Outstanding: <strong style={{ color: 'var(--red)' }}>{GHS(offsetModal.loan.outstanding)}</strong></div>
+            </div>
+            {/* Amount input */}
+            <div>
+              <label className="form-label">Amount to Apply (GH₵)</label>
+              <input
+                className="form-control"
+                type="number"
+                min="1"
+                step="0.01"
+                max={Math.min(Number(offsetModal.account.balance), Number(offsetModal.loan.outstanding))}
+                value={offsetAmt}
+                onChange={e => setOffsetAmt(e.target.value)}
+                style={{ fontSize: 20, fontWeight: 700, textAlign: 'center' }}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button className="btn btn-secondary btn-sm" style={{ flex: 1 }}
+                  onClick={() => setOffsetAmt(String(Number(offsetModal.loan.outstanding)))}>
+                  Full Loan ({GHS(offsetModal.loan.outstanding)})
+                </button>
+                <button className="btn btn-secondary btn-sm" style={{ flex: 1 }}
+                  onClick={() => setOffsetAmt(String(Math.min(Number(offsetModal.account.balance), Number(offsetModal.loan.outstanding))))}>
+                  Max Available
+                </button>
+              </div>
+            </div>
+            {/* Preview */}
+            {parseFloat(offsetAmt) > 0 && (
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 12, color: '#1e40af', fontWeight: 700, marginBottom: 6 }}>After offset:</div>
+                <div style={{ fontSize: 13 }}>Savings balance: <strong>{GHS(Number(offsetModal.account.balance) - parseFloat(offsetAmt))}</strong></div>
+                <div style={{ fontSize: 13, marginTop: 2 }}>Loan outstanding: <strong>{GHS(Math.max(0, Number(offsetModal.loan.outstanding) - parseFloat(offsetAmt)))}</strong></div>
+              </div>
+            )}
+            {offsetMsg && (
+              <div className="alert alert-error" style={{ marginTop: 4 }}>{offsetMsg}</div>
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   );

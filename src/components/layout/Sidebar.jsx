@@ -50,6 +50,7 @@ const NAV = [
       { label: 'New Loan / HP', path: '/loans/apply', icon: PlusCircle },
       { label: 'Calculator', path: '/loans/calculator', icon: Calculator },
       { label: 'HP Items Catalogue', path: '/hp/items', icon: Package },
+      { label: 'HP Loan Items', path: '/hp/loan-items', icon: ShoppingBag },
     ]
   },
   {

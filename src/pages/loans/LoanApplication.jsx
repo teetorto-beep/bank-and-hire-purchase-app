@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
 import { authDB } from '../../core/db';
+import { supabase } from '../../core/supabase';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
@@ -44,7 +45,9 @@ function calcLoan(principal, annualRate, months, method = 'amortization') {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const LOAN_CATEGORIES = ['personal', 'hire_purchase', 'micro', 'mortgage', 'emergency', 'group'];
+const LOAN_CATEGORIES = [
+  'personal', 'hire_purchase', 'micro', 'mortgage', 'emergency', 'group',
+];
 const FREQ_OPTIONS = [
   { value: 'daily',   label: 'Daily'   },
   { value: 'weekly',  label: 'Weekly'  },
@@ -73,10 +76,14 @@ export default function LoanApplication() {
   const [form, setForm] = useState({
     customerId: '', accountId: '', productId: '',
     amount: '', tenure: '', interestRate: '', purpose: '',
-    itemId: '', paymentFrequency: 'monthly', downPayment: '',
+    paymentFrequency: 'monthly', downPayment: '',
     calcMethod: 'amortization',
     requireAuth: false,
   });
+  // Multi-item basket: [{ item, qty }]
+  const [basket,       setBasket]       = useState([]);
+  const [manualTotal,  setManualTotal]  = useState(''); // manual loan amount override
+  const [shopOpen,     setShopOpen]     = useState(false); // popup shop modal
   const [custSearch,   setCustSearch]   = useState('');
   const [rateEdited,   setRateEdited]   = useState(false);
   const [submitting,   setSubmitting]   = useState(false);
@@ -84,6 +91,7 @@ export default function LoanApplication() {
   const [success,      setSuccess]      = useState(null);
   const [editingRate,  setEditingRate]  = useState(false);
   const [itemCategory, setItemCategory] = useState('All');
+  const [itemSearch,   setItemSearch]   = useState('');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -101,10 +109,10 @@ export default function LoanApplication() {
   const custAccounts     = (accounts || []).filter(a => a.customerId === form.customerId && a.status === 'active');
   const selectedCustomer = (customers || []).find(c => c.id === form.customerId);
   const selectedAccount  = custAccounts.find(a => a.id === form.accountId);
-  const selectedItem     = (hpItems || []).find(i => i.id === form.itemId);
 
+  // Show ALL items (including out-of-stock) so customers can still select them
   const hpItemsInStock   = useMemo(
-    () => (hpItems || []).filter(i => i.stock > 0),
+    () => (hpItems || []),
     [hpItems]
   );
 
@@ -114,14 +122,37 @@ export default function LoanApplication() {
   }, [hpItemsInStock]);
 
   const filteredItems = useMemo(() => {
-    if (itemCategory === 'All') return hpItemsInStock;
-    return hpItemsInStock.filter(i => i.category === itemCategory);
-  }, [hpItemsInStock, itemCategory]);
+    let items = itemCategory === 'All' ? hpItemsInStock : hpItemsInStock.filter(i => i.category === itemCategory);
+    if (itemSearch.trim()) {
+      const q = itemSearch.toLowerCase();
+      items = items.filter(i => i.name?.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q));
+    }
+    return items;
+  }, [hpItemsInStock, itemCategory, itemSearch]);
 
+  // Basket helpers
+  const basketTotal  = basket.reduce((s, b) => s + b.item.price * b.qty, 0);
   const downPayment  = parseFloat(form.downPayment) || 0;
+  // Use manual total if entered, otherwise use basket total (for all loan types)
+  const effectiveTotal = manualTotal !== '' ? (parseFloat(manualTotal) || 0) : basketTotal;
   const loanPrincipal = isHP
-    ? Math.max(0, (selectedItem?.price || 0) - downPayment)
-    : parseFloat(form.amount) || 0;
+    ? Math.max(0, effectiveTotal - downPayment)
+    : effectiveTotal > 0
+      ? Math.max(0, effectiveTotal - downPayment)  // cart total used for any loan type
+      : parseFloat(form.amount) || 0;
+
+  const addToBasket = (item) => {
+    setBasket(p => {
+      const existing = p.find(b => b.item.id === item.id);
+      if (existing) return p.map(b => b.item.id === item.id ? { ...b, qty: b.qty + 1 } : b);
+      return [...p, { item, qty: 1 }];
+    });
+  };
+  const removeFromBasket = (itemId) => setBasket(p => p.filter(b => b.item.id !== itemId));
+  const setBasketQty = (itemId, qty) => {
+    const q = Math.max(1, parseInt(qty) || 1);
+    setBasket(p => p.map(b => b.item.id === itemId ? { ...b, qty: q } : b));
+  };
 
   const tenure       = parseInt(form.tenure) || 0;
   const loanCalc     = calcLoan(loanPrincipal, rate, tenure, form.calcMethod);
@@ -157,33 +188,58 @@ export default function LoanApplication() {
       const role  = user?.role || 'teller';
       const needsApproval = requiresApproval('loan_creation', role, 0, rules) || form.requireAuth;
       if (isHP) {
-        if (!form.itemId) { setError('Please select an item from the catalogue.'); setSubmitting(false); return; }
+        if (basket.length === 0 && effectiveTotal <= 0) { setError('Please select items from the shop or enter a loan amount.'); setSubmitting(false); return; }
+        // Use first item for the HP agreement record; total covers all items
+        const firstItem = basket[0].item;
+        const itemNames = basket.map(b => b.qty > 1 ? `${b.item.name} x${b.qty}` : b.item.name).join(', ');
         const payload = {
           customerId:       form.customerId,
           accountId:        form.accountId,
-          itemId:           form.itemId,
-          itemName:         selectedItem?.name || '',
-          totalPrice:       selectedItem?.price || 0,
+          itemId:           firstItem.id,
+          itemName:         basket.length === 1 ? firstItem.name : `${basket.length} items: ${itemNames}`,
+          totalPrice:       effectiveTotal,
           downPayment,
           interestRate:     rate,
           tenure,
           paymentFrequency: form.paymentFrequency,
-          purpose:          form.purpose,
-          // Pass pre-calculated values so db.js doesn't recalculate with a different method
+          purpose:          form.purpose || itemNames,
           monthlyPayment:   monthly,
           totalRepayment:   totalRepay,
           suggestedPayment: monthly,
         };
         const { data, error: err } = await createHPAgreementWithLoan(payload);
         if (err) throw new Error(err.message || 'Failed to create HP agreement.');
-        setSuccess({ type: 'hp', data, item: selectedItem, customer: selectedCustomer, product: selectedProduct, pending: false });
+
+        // ── Auto-insert basket items into hp_loan_items ──────────────────
+        // data.loan contains the created loan record
+        const loanId = data?.loan?.id;
+        if (loanId && basket.length > 0) {
+          const rows = basket.map(b => ({
+            loan_id:    loanId,
+            item_id:    b.item.id,
+            quantity:   b.qty,
+            unit_price: b.item.price,
+            item_name:  b.item.name,
+            item_image: b.item.image || '',
+            added_by:   user?.name || 'Loan Application',
+          }));
+          // Insert all basket items — ignore duplicates silently
+          const { error: itemsErr } = await supabase
+            .from('hp_loan_items')
+            .insert(rows);
+          if (itemsErr) console.warn('[HP Loan Items] Insert error:', itemsErr.message);
+        }
+
+        setSuccess({ type: 'hp', data, basket, customer: selectedCustomer, product: selectedProduct, pending: false });
       } else {
-        if (!form.amount || parseFloat(form.amount) <= 0) { setError('Please enter a valid loan amount.'); setSubmitting(false); return; }
+        // For non-HP: use cart total if no manual amount entered
+        const finalAmount = parseFloat(form.amount) > 0 ? parseFloat(form.amount) : effectiveTotal;
+        if (!finalAmount || finalAmount <= 0) { setError('Please enter a loan amount or select items from the shop.'); setSubmitting(false); return; }
         const payload = {
           customerId:     form.customerId,
           accountId:      form.accountId,
           type:           selectedProduct?.category || 'personal',
-          amount:         parseFloat(form.amount),
+          amount:         finalAmount,
           interestRate:   rate,
           tenure,
           monthlyPayment: monthly,
@@ -213,8 +269,8 @@ export default function LoanApplication() {
   };
 
   const resetForm = () => {
-    setForm({ customerId: '', accountId: '', productId: '', amount: '', tenure: '', interestRate: '', purpose: '', itemId: '', paymentFrequency: 'monthly', downPayment: '' });
-    setCustSearch(''); setRateEdited(false); setEditingRate(false); setSuccess(null); setError('');
+    setForm({ customerId: '', accountId: '', productId: '', amount: '', tenure: '', interestRate: '', purpose: '', paymentFrequency: 'monthly', downPayment: '', calcMethod: 'amortization', requireAuth: false });
+    setBasket([]); setManualTotal(''); setCustSearch(''); setRateEdited(false); setEditingRate(false); setSuccess(null); setError(''); setItemSearch('');
   };
 
   // ── Success screen ──────────────────────────────────────────────────────────
@@ -246,10 +302,15 @@ export default function LoanApplication() {
                 <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>Product</div>
                 <div style={{ fontWeight: 700, marginTop: 2 }}>{success.product?.name}</div>
               </div>
-              {success.type === 'hp' && success.item && (
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>Item</div>
-                  <div style={{ fontWeight: 700, marginTop: 2 }}>{success.item.name}</div>
+              {success.type === 'hp' && success.basket?.length > 0 && (
+                <div style={{ gridColumn: 'span 2' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>Items Purchased</div>
+                  {success.basket.map(b => (
+                    <div key={b.item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 3 }}>
+                      <span>{b.item.image || '📦'} {b.item.name}{b.qty > 1 ? ` x${b.qty}` : ''}</span>
+                      <span style={{ fontWeight: 600 }}>{GHS(b.item.price * b.qty)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
               <div>
@@ -472,94 +533,160 @@ export default function LoanApplication() {
               </div>
             )}
 
-            {/* STEP 4 — Item Catalogue (HP only) */}
-            {isHP && (
+            {/* STEP 4 — Shop Catalogue (available for all loan types) */}
+            {form.productId && (
               <div className="card">
-                <div className="card-header">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: basket.length > 0 ? 14 : 0 }}>
                   <div>
-                    <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ShoppingBag size={16} /> Step 4 — Item Catalogue
+                    <div style={{ fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ShoppingBag size={16} style={{ color: '#7c3aed' }} /> Step 4 — Select Items (Optional)
                     </div>
-                    <div className="card-subtitle">Select the item for hire purchase</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
+                      {basket.length === 0 ? 'Browse the shop and add items — total auto-fills the loan amount' : `${basket.length} item${basket.length !== 1 ? 's' : ''} in cart · Total: ${GHS(basketTotal)}`}
+                    </div>
                   </div>
+                  <button type="button" className="btn btn-primary"
+                    onClick={() => setShopOpen(true)}
+                    style={{ background: 'linear-gradient(135deg, #1e40af, #7c3aed)', border: 'none' }}>
+                    <ShoppingBag size={14} /> {basket.length > 0 ? 'Edit Cart' : 'Open Shop'}
+                  </button>
                 </div>
 
-                {/* Category filter */}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-                  {itemCategories.map(cat => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setItemCategory(cat)}
-                      style={{
-                        padding: '4px 12px',
-                        borderRadius: 20,
-                        border: `1px solid ${itemCategory === cat ? 'var(--brand)' : 'var(--border)'}`,
-                        background: itemCategory === cat ? 'var(--brand)' : 'var(--surface)',
-                        color: itemCategory === cat ? '#fff' : 'var(--text-2)',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all .15s',
-                      }}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-
-                {filteredItems.length === 0 ? (
-                  <div style={{ fontSize: 13, color: 'var(--text-3)', padding: '16px 0', textAlign: 'center' }}>
-                    No items in stock for this category.
-                  </div>
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
-                    {filteredItems.map(item => {
-                      const sel = form.itemId === item.id;
-                      return (
-                        <div
-                          key={item.id}
-                          onClick={() => set('itemId', item.id)}
-                          style={{
-                            border: `2px solid ${sel ? 'var(--brand)' : 'var(--border)'}`,
-                            borderRadius: 'var(--radius-lg)',
-                            padding: '12px',
-                            cursor: 'pointer',
-                            background: sel ? 'var(--brand-light)' : 'var(--surface)',
-                            transition: 'all .15s',
-                            textAlign: 'center',
-                          }}
-                        >
-                          <div style={{ fontSize: 32, marginBottom: 6 }}>{item.image || '📦'}</div>
-                          <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 4, lineHeight: 1.3 }}>{item.name}</div>
-                          <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--brand)', marginBottom: 4 }}>{GHS(item.price)}</div>
-                          {item.dailyPayment > 0 && (
-                            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{GHS(item.dailyPayment)}/day</div>
-                          )}
-                          {item.weeklyPayment > 0 && (
-                            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{GHS(item.weeklyPayment)}/wk</div>
-                          )}
-                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>Stock: {item.stock}</div>
+                {/* Cart preview */}
+                {basket.length > 0 && (
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                    {basket.map((b, i) => (
+                      <div key={b.item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: i < basket.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                        <span style={{ fontSize: 18 }}>{b.item.image || '📦'}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{b.item.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{GHS(b.item.price)} × {b.qty}</div>
                         </div>
-                      );
-                    })}
+                        <span style={{ fontWeight: 700, color: '#7c3aed' }}>{GHS(b.item.price * b.qty)}</span>
+                        <button type="button" onClick={() => removeFromBasket(b.item.id)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 2, display: 'flex' }}>
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 14, paddingTop: 10, marginTop: 4, borderTop: '2px solid #7c3aed' }}>
+                      <span>Cart Total</span>
+                      <span style={{ color: '#7c3aed' }}>{GHS(basketTotal)}</span>
+                    </div>
                   </div>
                 )}
+              </div>
+            )}
 
-                {/* Selected item summary */}
-                {selectedItem && (
-                  <div style={{ marginTop: 16, background: 'var(--purple-bg)', borderRadius: 'var(--radius)', padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <div style={{ fontSize: 28 }}>{selectedItem.image || '📦'}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: '#5b21b6' }}>{selectedItem.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                        <span>Cash Price: <strong>{GHS(selectedItem.price)}</strong></span>
-                        {selectedItem.dailyPayment > 0 && <span>Daily: <strong>{GHS(selectedItem.dailyPayment)}</strong></span>}
-                        {selectedItem.weeklyPayment > 0 && <span>Weekly: <strong>{GHS(selectedItem.weeklyPayment)}</strong></span>}
+            {/* Shop Popup Modal */}
+            {form.productId && shopOpen && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+                onClick={e => { if (e.target === e.currentTarget) setShopOpen(false); }}>
+                <div style={{ background: 'var(--surface)', borderRadius: 16, width: '100%', maxWidth: 900, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}>
+                  {/* Modal header */}
+                  <div style={{ background: 'linear-gradient(135deg, #1e40af, #7c3aed)', padding: '18px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ color: '#fff' }}>
+                      <div style={{ fontWeight: 800, fontSize: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <ShoppingBag size={20} /> HP Item Shop
+                      </div>
+                      <div style={{ fontSize: 12, opacity: .8, marginTop: 2 }}>
+                        {hpItems.length} items available · {basket.length} in cart · {GHS(basketTotal)}
                       </div>
                     </div>
+                    <button type="button" onClick={() => setShopOpen(false)}
+                      style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 8, padding: '8px 16px', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                      Done ✓
+                    </button>
                   </div>
-                )}
+
+                  {/* Search + filters */}
+                  <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+                      <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+                      <input className="form-control" placeholder="Search items..."
+                        value={itemSearch} onChange={e => setItemSearch(e.target.value)}
+                        style={{ paddingLeft: 30, fontSize: 13 }} autoFocus />
+                    </div>
+                    {['All', ...new Set((hpItems || []).map(i => i.category).filter(Boolean))].map(cat => (
+                      <button key={cat} type="button" onClick={() => setItemCategory(cat)}
+                        style={{ padding: '5px 14px', borderRadius: 20, border: `1.5px solid ${itemCategory === cat ? '#7c3aed' : 'var(--border)'}`, background: itemCategory === cat ? '#7c3aed' : 'var(--surface)', color: itemCategory === cat ? '#fff' : 'var(--text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Item grid — scrollable */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+                    {(() => {
+                      let items = itemCategory === 'All' ? (hpItems || []) : (hpItems || []).filter(i => i.category === itemCategory);
+                      if (itemSearch.trim()) {
+                        const q = itemSearch.toLowerCase();
+                        items = items.filter(i => i.name?.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q));
+                      }
+                      if (items.length === 0) return (
+                        <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
+                          <Package size={40} style={{ opacity: .2, display: 'block', margin: '0 auto 12px' }} />
+                          <div style={{ fontWeight: 600 }}>No items match your filter</div>
+                        </div>
+                      );
+                      return (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 12 }}>
+                          {items.map(item => {
+                            const inBasket = basket.find(b => b.item.id === item.id);
+                            return (
+                              <div key={item.id} style={{ border: `2px solid ${inBasket ? '#7c3aed' : 'var(--border)'}`, borderRadius: 12, overflow: 'hidden', background: inBasket ? '#faf5ff' : 'var(--surface)', position: 'relative' }}>
+                                {inBasket && (
+                                  <div style={{ position: 'absolute', top: 8, right: 8, width: 22, height: 22, borderRadius: '50%', background: '#7c3aed', color: '#fff', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2 }}>
+                                    {inBasket.qty}
+                                  </div>
+                                )}
+                                <div style={{ padding: '14px 12px 8px', textAlign: 'center' }}>
+                                  <div style={{ fontSize: 34, marginBottom: 6 }}>{item.image || '📦'}</div>
+                                  <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.3, marginBottom: 3 }}>{item.name}</div>
+                                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{item.category}</div>
+                                  <div style={{ fontWeight: 900, fontSize: 15, color: inBasket ? '#7c3aed' : 'var(--brand)' }}>{GHS(item.price)}</div>
+                                </div>
+                                <div style={{ padding: '0 8px 10px', display: 'flex', gap: 4 }}>
+                                  {inBasket ? (
+                                    <>
+                                      <button type="button" onClick={() => setBasketQty(item.id, Math.max(1, inBasket.qty - 1))}
+                                        style={{ flex: 1, padding: '4px 0', border: '1px solid #7c3aed', borderRadius: 6, background: '#fff', color: '#7c3aed', fontWeight: 800, fontSize: 16, cursor: 'pointer' }}>−</button>
+                                      <span style={{ flex: 1, textAlign: 'center', fontWeight: 800, fontSize: 13, lineHeight: '28px', color: '#7c3aed' }}>{inBasket.qty}</span>
+                                      <button type="button" onClick={() => setBasketQty(item.id, inBasket.qty + 1)}
+                                        style={{ flex: 1, padding: '4px 0', border: '1px solid #7c3aed', borderRadius: 6, background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer' }}>+</button>
+                                      <button type="button" onClick={() => removeFromBasket(item.id)}
+                                        style={{ padding: '4px 7px', border: '1px solid var(--red)', borderRadius: 6, background: '#fff', color: 'var(--red)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                                        <X size={11} />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button type="button" onClick={() => addToBasket(item)}
+                                      style={{ flex: 1, padding: '6px 0', border: 'none', borderRadius: 6, background: '#7c3aed', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                                      + Add
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Cart footer */}
+                  {basket.length > 0 && (
+                    <div style={{ padding: '14px 24px', borderTop: '2px solid #7c3aed', background: '#faf5ff', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: 13, color: '#5b21b6' }}>
+                        <strong>{basket.length}</strong> item{basket.length !== 1 ? 's' : ''} · <strong>{GHS(basketTotal)}</strong> total
+                      </div>
+                      <button type="button" className="btn btn-primary" onClick={() => setShopOpen(false)}
+                        style={{ background: '#7c3aed', border: 'none' }}>
+                        ✓ Done — Use This Cart
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -575,6 +702,43 @@ export default function LoanApplication() {
 
                 {isHP ? (
                   <>
+                    {/* Manual total override */}
+                    <div className="form-group" style={{ marginBottom: 16, padding: 14, background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <label className="form-label" style={{ marginBottom: 6 }}>
+                        Loan Total Amount
+                        <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-3)', marginLeft: 8 }}>
+                          {manualTotal !== '' ? '(manual override)' : `(from cart: ${GHS(basketTotal)})`}
+                        </span>
+                      </label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        placeholder={basketTotal > 0 ? `Cart total: ${basketTotal}` : 'Enter total loan amount…'}
+                        min="0"
+                        step="0.01"
+                        value={manualTotal}
+                        onChange={e => setManualTotal(e.target.value)}
+                        style={{ fontSize: 20, fontWeight: 700, textAlign: 'center' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                        <div className="form-hint">
+                          Leave blank to use cart total · Enter a custom amount to override
+                        </div>
+                        {manualTotal !== '' && (
+                          <button type="button" className="btn btn-ghost btn-sm"
+                            onClick={() => setManualTotal('')}
+                            style={{ fontSize: 11, color: 'var(--text-3)', padding: '2px 8px' }}>
+                            Reset to cart total
+                          </button>
+                        )}
+                      </div>
+                      {manualTotal !== '' && basketTotal > 0 && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--brand)', fontWeight: 600 }}>
+                          Using manual total: {GHS(parseFloat(manualTotal) || 0)} (cart was {GHS(basketTotal)})
+                        </div>
+                      )}
+                    </div>
+
                     <div className="form-row" style={{ marginBottom: 16 }}>
                       <div className="form-group" style={{ marginBottom: 0 }}>
                         <label className="form-label">Down Payment</label>
@@ -583,12 +747,12 @@ export default function LoanApplication() {
                           className="form-control"
                           placeholder="0.00"
                           min="0"
-                          max={selectedItem?.price || undefined}
+                          max={effectiveTotal || undefined}
                           value={form.downPayment}
                           onChange={e => set('downPayment', e.target.value)}
                         />
-                        {selectedItem && (
-                          <div className="form-hint">Max: {GHS(selectedItem.price)}</div>
+                        {effectiveTotal > 0 && (
+                          <div className="form-hint">Max: {GHS(effectiveTotal)}</div>
                         )}
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
@@ -622,10 +786,19 @@ export default function LoanApplication() {
                 ) : (
                   <div className="form-group">
                     <label className="form-label">Loan Amount <span className="required">*</span></label>
+                    {effectiveTotal > 0 && (
+                      <div style={{ marginBottom: 8, padding: '8px 12px', background: 'var(--brand-light)', borderRadius: 8, fontSize: 13, color: 'var(--brand)', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Cart total: {GHS(effectiveTotal)}</span>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                          onClick={() => set('amount', String(effectiveTotal))}>
+                          Use cart total
+                        </button>
+                      </div>
+                    )}
                     <input
                       type="number"
                       className="form-control"
-                      placeholder="Enter amount"
+                      placeholder={effectiveTotal > 0 ? `Cart total: ${effectiveTotal} — or enter custom amount` : 'Enter amount'}
                       min="1"
                       value={form.amount}
                       onChange={e => set('amount', e.target.value)}
@@ -803,16 +976,19 @@ export default function LoanApplication() {
                   <span style={{ fontWeight: 600 }}>{selectedProduct?.name || '—'}</span>
                 </div>
 
-                {/* HP-specific */}
-                {isHP && selectedItem && (
+                {/* HP basket summary */}
+                {isHP && basket.length > 0 && (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                      <span style={{ color: 'var(--text-3)' }}>Item</span>
-                      <span style={{ fontWeight: 600 }}>{selectedItem.name}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                      <span style={{ color: 'var(--text-3)' }}>Cash Price</span>
-                      <span style={{ fontWeight: 600 }}>{GHS(selectedItem.price)}</span>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Cart Items</div>
+                    {basket.map(b => (
+                      <div key={b.item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-2)' }}>{b.item.image || '📦'} {b.item.name}{b.qty > 1 ? ` x${b.qty}` : ''}</span>
+                        <span style={{ fontWeight: 600 }}>{GHS(b.item.price * b.qty)}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, paddingTop: 6, borderTop: '1px solid var(--border)', marginTop: 4 }}>
+                      <span>Cart Total</span>
+                      <span style={{ color: '#7c3aed' }}>{GHS(basketTotal)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                       <span style={{ color: 'var(--text-3)' }}>Down Payment</span>

@@ -8,6 +8,39 @@ export const fmtDate = (v) => {
   return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
 };
 
+/**
+ * Returns a display label for an account type.
+ * If a customer has multiple accounts of the same type, appends a number:
+ *   e.g. "Hire Purchase 1", "Hire Purchase 2"
+ *
+ * @param {object} account  - the account object (needs .type, .id, .customer_id or .customerId)
+ * @param {Array}  allAccounts - full accounts array from context
+ * @returns {string}
+ */
+export function accountTypeLabel(account, allAccounts) {
+  if (!account) return '—';
+  const type = account.type || '';
+  const baseLabel = type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  if (!allAccounts?.length) return baseLabel;
+
+  const custId = account.customer_id || account.customerId;
+  if (!custId) return baseLabel;
+
+  // Find all accounts this customer has of the same type, sorted by opened_at / id
+  const sameType = allAccounts
+    .filter(a => (a.customer_id || a.customerId) === custId && a.type === type)
+    .sort((a, b) => {
+      const da = new Date(a.opened_at || a.openedAt || 0).getTime();
+      const db = new Date(b.opened_at || b.openedAt || 0).getTime();
+      return da !== db ? da - db : (a.id > b.id ? 1 : -1);
+    });
+
+  if (sameType.length <= 1) return baseLabel;
+
+  const idx = sameType.findIndex(a => a.id === account.id);
+  return `${baseLabel} ${idx + 1}`;
+}
+
 export const fmtDateTime = (v) => {
   if (!v) return '—';
   const d = new Date(v);

@@ -2,7 +2,7 @@
 import { useApp } from '../../context/AppContext';
 import { authDB } from '../../core/db';
 import Modal from '../../components/ui/Modal';
-import { Plus, Edit2, Trash2, Upload, Download, FileText, BarChart2, Clock, RefreshCw, TrendingUp } from 'lucide-react';
+import { Plus, Edit2, Trash2, Upload, Download, FileText, BarChart2, Clock, RefreshCw, TrendingUp, Search } from 'lucide-react';
 import { exportHPCataloguePDF, exportCSV } from '../../core/export';
 import Papa from 'papaparse';
 
@@ -49,6 +49,9 @@ export default function HPItems() {
 
   const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
 
+  // Catalogue search
+  const [catSearch, setCatSearch] = useState('');
+
   const openAdd = () => { setEditing(null); setForm(EMPTY); setModal(true); };
   const openEdit = (item) => { setEditing(item); setForm({ ...item }); setModal(true); };
 
@@ -85,7 +88,14 @@ export default function HPItems() {
     setConfirmDelete(null);
   };
 
-  const filtered = catFilter === 'all' ? hpItems : hpItems.filter(i => i.category === catFilter);
+  const filtered = (() => {
+    let items = catFilter === 'all' ? hpItems : hpItems.filter(i => i.category === catFilter);
+    if (catSearch.trim()) {
+      const q = catSearch.toLowerCase();
+      items = items.filter(i => i.name?.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q));
+    }
+    return items;
+  })();
 
   // Stock report data
   const stockReport = [...hpItems].sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0));
@@ -180,10 +190,23 @@ export default function HPItems() {
             <Upload size={14} />Upload CSV
             <input type="file" accept=".csv" style={{ display: 'none' }} onChange={(e) => {
               const file = e.target.files[0]; if (!file) return;
-              Papa.parse(file, { header: true, skipEmptyLines: true, complete: (res) => {
-                res.data.forEach(row => {
-                  if (row.name) addHPItem({ name: row.name, category: row.category || 'Other', description: row.description || '', price: parseFloat(row.price) || 0, stock: parseInt(row.stock) || 0, image: row.image || '📦', dailyPayment: parseFloat(row.dailyPayment) || 0, weeklyPayment: parseFloat(row.weeklyPayment) || 0 });
-                });
+              Papa.parse(file, { header: true, skipEmptyLines: true, complete: async (res) => {
+                let added = 0, skipped = 0;
+                for (const row of res.data) {
+                  // Handle both capitalised (Name) and lowercase (name) headers
+                  const name     = (row['Name']           || row['name']           || '').trim();
+                  const category = (row['Category']       || row['category']       || 'Other').trim();
+                  const desc     = (row['Description']    || row['description']    || '').trim();
+                  const price    = parseFloat(row['Price']         || row['price']         || 0) || 0;
+                  const stock    = parseInt(row['Stock']           || row['stock']           || 0) || 0;
+                  const daily    = parseFloat(row['Daily Payment'] || row['dailyPayment']   || 0) || 0;
+                  const weekly   = parseFloat(row['Weekly Payment']|| row['weeklyPayment']  || 0) || 0;
+                  const image    = (row['Image']          || row['image']          || '📦').trim() || '📦';
+                  if (!name) { skipped++; continue; }
+                  const result = await addHPItem({ name, category, description: desc, price, stock, image, dailyPayment: daily, weeklyPayment: weekly });
+                  if (result?.error) skipped++; else added++;
+                }
+                alert(`Import complete: ${added} added, ${skipped} skipped.`);
                 e.target.value = '';
               }});
             }} />
@@ -207,66 +230,85 @@ export default function HPItems() {
       {/* ── CATALOGUE ── */}
       {tab === 'catalogue' && (
         <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+          {/* Search + category filters */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+              <input className="form-control" placeholder="Search items by name, category..."
+                value={catSearch} onChange={e => setCatSearch(e.target.value)}
+                style={{ paddingLeft: 32, fontSize: 13 }} />
+            </div>
             {['all', ...CATEGORIES].map(c => (
-              <button key={c} className={`btn btn-sm ${catFilter === c ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCatFilter(c)} style={{ textTransform: 'capitalize' }}>
-                {c === 'all' ? 'All Items' : c}
+              <button key={c} className={`btn btn-sm ${catFilter === c ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setCatFilter(c)} style={{ textTransform: 'capitalize' }}>
+                {c === 'all' ? `All (${hpItems.length})` : c}
               </button>
             ))}
           </div>
           {filtered.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: 64 }}>
               <div style={{ fontSize: 48, marginBottom: 16 }}>🛍️</div>
-              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>No items yet</div>
-              <div style={{ color: 'var(--text-3)', marginBottom: 24 }}>Add items to your hire purchase catalogue</div>
-              <button className="btn btn-primary" onClick={openAdd}><Plus size={15} />Add First Item</button>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
+                {catSearch || catFilter !== 'all' ? 'No items match your filter' : 'No items yet'}
+              </div>
+              <div style={{ color: 'var(--text-3)', marginBottom: 24 }}>
+                {catSearch || catFilter !== 'all' ? 'Try a different search or category' : 'Add items to your hire purchase catalogue'}
+              </div>
+              {!catSearch && catFilter === 'all' && (
+                <button className="btn btn-primary" onClick={openAdd}><Plus size={15} />Add First Item</button>
+              )}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-              {filtered.map(item => (
-                <div key={item.id} className="card" style={{ position: 'relative' }}>
-                  <div style={{ position: 'absolute', top: 12, right: 12 }}>
-                    <span className={`badge ${item.stock > 0 ? (item.stock <= 2 ? 'badge-yellow' : 'badge-green') : 'badge-red'}`}>
-                      {item.stock > 0 ? `${item.stock} in stock` : 'Out of stock'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                    <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--surface-2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
-                      {item.image || '📦'}
+            <>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+                Showing {filtered.length} of {hpItems.length} items
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+                {filtered.map(item => (
+                  <div key={item.id} className="card" style={{ position: 'relative' }}>
+                    <div style={{ position: 'absolute', top: 12, right: 12 }}>
+                      <span className={`badge ${item.stock > 0 ? (item.stock <= 2 ? 'badge-yellow' : 'badge-green') : 'badge-red'}`}>
+                        {item.stock > 0 ? `${item.stock} in stock` : 'Out of stock'}
+                      </span>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 800, fontSize: 14 }}>{item.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{item.category}</div>
-                    </div>
-                  </div>
-                  {item.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12, lineHeight: 1.5 }}>{item.description}</div>}
-                  <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 12, marginBottom: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Cash Price</span>
-                      <span style={{ fontSize: 15, fontWeight: 800 }}>{GHS(item.price)}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <div style={{ flex: 1, background: 'var(--blue-bg)', borderRadius: 6, padding: '6px 10px', textAlign: 'center' }}>
-                        <div style={{ fontSize: 10, color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>Daily</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: '#1e40af' }}>{GHS(item.dailyPayment)}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--surface-2)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
+                        {item.image || '📦'}
                       </div>
-                      <div style={{ flex: 1, background: 'var(--purple-bg)', borderRadius: 6, padding: '6px 10px', textAlign: 'center' }}>
-                        <div style={{ fontSize: 10, color: '#5b21b6', fontWeight: 700, textTransform: 'uppercase' }}>Weekly</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: '#5b21b6' }}>{GHS(item.weeklyPayment)}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>{item.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{item.category}</div>
                       </div>
                     </div>
+                    {item.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12, lineHeight: 1.5 }}>{item.description}</div>}
+                    <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>Cash Price</span>
+                        <span style={{ fontSize: 15, fontWeight: 800 }}>{GHS(item.price)}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <div style={{ flex: 1, background: 'var(--blue-bg)', borderRadius: 6, padding: '6px 10px', textAlign: 'center' }}>
+                          <div style={{ fontSize: 10, color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>Daily</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e40af' }}>{GHS(item.dailyPayment)}</div>
+                        </div>
+                        <div style={{ flex: 1, background: 'var(--purple-bg)', borderRadius: 6, padding: '6px 10px', textAlign: 'center' }}>
+                          <div style={{ fontSize: 10, color: '#5b21b6', fontWeight: 700, textTransform: 'uppercase' }}>Weekly</div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: '#5b21b6' }}>{GHS(item.weeklyPayment)}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {(item.created_at || item.createdAt) && <span>Added: {fmtDT(item.created_at || item.createdAt)}</span>}
+                      {(item.updated_at || item.updatedAt) && <span>Updated: {fmtDT(item.updated_at || item.updatedAt)}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => openEdit(item)}><Edit2 size={13} />Edit</button>
+                      <button className="btn btn-ghost btn-sm btn-icon" style={{ color: 'var(--red)' }} onClick={() => setConfirmDelete(item)}><Trash2 size={14} /></button>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {(item.created_at || item.createdAt) && <span>Added: {fmtDT(item.created_at || item.createdAt)}</span>}
-                    {(item.updated_at || item.updatedAt) && <span>Updated: {fmtDT(item.updated_at || item.updatedAt)}</span>}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => openEdit(item)}><Edit2 size={13} />Edit</button>
-                    <button className="btn btn-ghost btn-sm btn-icon" style={{ color: 'var(--red)' }} onClick={() => setConfirmDelete(item)}><Trash2 size={14} /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           )}
         </>
       )}
@@ -443,46 +485,92 @@ export default function HPItems() {
       {/* ── ACTIVITY LOG ── */}
       {tab === 'activity' && (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>{activityLog.length} events recorded</div>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Activity Log</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{activityLog.length} events recorded</div>
+            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => exportCSV(activityLog.map(a => ({ Action: a.action.toUpperCase(), Item: a.itemName, Category: a.category, Price: GHS(a.price), Stock: a.stock, By: a.by, DateTime: fmtDT(a.at) })), 'hp-activity-log')}>
                 <Download size={13} />Export Log
               </button>
-              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => { if (window.confirm('Clear activity log?')) { setActivityLog([]); localStorage.removeItem('hp_activity_log'); } }}>
+              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }}
+                onClick={() => { if (window.confirm('Clear activity log?')) { setActivityLog([]); localStorage.removeItem('hp_activity_log'); } }}>
                 <Trash2 size={13} />Clear Log
               </button>
             </div>
           </div>
+
+          {/* Stats row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+            {[
+              { label: 'Added',    value: added,                                                   color: '#10b981', bg: '#d1fae5', icon: '➕' },
+              { label: 'Updated',  value: updated,                                                 color: '#1a56db', bg: '#dbeafe', icon: '✏️' },
+              { label: 'Deleted',  value: deleted,                                                 color: '#ef4444', bg: '#fee2e2', icon: '🗑️' },
+              { label: 'Imported', value: activityLog.filter(a => a.action === 'imported').length, color: '#7c3aed', bg: '#ede9fe', icon: '📥' },
+            ].map(s => (
+              <div key={s.label} style={{ background: s.bg, borderRadius: 12, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 28 }}>{s.icon}</div>
+                <div>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: s.color, textTransform: 'uppercase', marginTop: 3, opacity: .8 }}>{s.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
           {activityLog.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
-              <Clock size={40} style={{ margin: '0 auto 12px', display: 'block', opacity: .3 }} />
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>No activity yet</div>
+            <div className="card" style={{ textAlign: 'center', padding: 56, color: 'var(--text-3)' }}>
+              <Clock size={44} style={{ margin: '0 auto 14px', display: 'block', opacity: .2 }} />
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>No activity yet</div>
               <div style={{ fontSize: 13 }}>Adding, editing, deleting or importing items will appear here</div>
             </div>
           ) : (
-            <div className="card">
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Action</th><th>Item</th><th>Category</th><th>Price</th><th>Stock</th><th>By</th><th>Date & Time</th></tr></thead>
-                  <tbody>
-                    {activityLog.map(a => {
-                      const colors = { added: 'badge-green', updated: 'badge-blue', deleted: 'badge-red', imported: 'badge-purple' };
-                      return (
-                        <tr key={a.id}>
-                          <td><span className={`badge ${colors[a.action] || 'badge-gray'}`}>{a.action.toUpperCase()}</span></td>
-                          <td style={{ fontWeight: 700 }}>{a.itemName}</td>
-                          <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{a.category}</td>
-                          <td style={{ fontWeight: 600 }}>{GHS(a.price)}</td>
-                          <td>{a.stock}</td>
-                          <td style={{ fontSize: 12 }}>{a.by}</td>
-                          <td style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{fmtDT(a.at)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {activityLog.map((a, idx) => {
+                const cfg = {
+                  added:    { color: '#10b981', bg: '#d1fae5', label: 'ADDED',    icon: '➕' },
+                  updated:  { color: '#1a56db', bg: '#dbeafe', label: 'UPDATED',  icon: '✏️' },
+                  deleted:  { color: '#ef4444', bg: '#fee2e2', label: 'DELETED',  icon: '🗑️' },
+                  imported: { color: '#7c3aed', bg: '#ede9fe', label: 'IMPORTED', icon: '📥' },
+                }[a.action] || { color: '#64748b', bg: '#f1f5f9', label: a.action.toUpperCase(), icon: '•' };
+
+                return (
+                  <div key={a.id} style={{ display: 'flex', gap: 0, position: 'relative' }}>
+                    {/* Timeline line */}
+                    {idx < activityLog.length - 1 && (
+                      <div style={{ position: 'absolute', left: 19, top: 40, bottom: 0, width: 2, background: 'var(--border)', zIndex: 0 }} />
+                    )}
+                    {/* Dot */}
+                    <div style={{ flexShrink: 0, width: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 14, zIndex: 1 }}>
+                      <div style={{ width: 22, height: 22, borderRadius: '50%', background: cfg.bg, border: `2px solid ${cfg.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}>
+                        {cfg.icon}
+                      </div>
+                    </div>
+                    {/* Card */}
+                    <div style={{ flex: 1, marginBottom: 10, marginLeft: 8 }}>
+                      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 8px', borderRadius: 20, background: cfg.bg, color: cfg.color, letterSpacing: '.04em' }}>
+                            {cfg.label}
+                          </span>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{a.itemName}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                              {a.category} · {GHS(a.price)} · Stock: {a.stock}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{fmtDT(a.at)}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>by {a.by}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

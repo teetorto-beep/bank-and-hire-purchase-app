@@ -13,64 +13,115 @@ const TYPES = [
   { key:"hp",      label:"HP",       sub:"Hire purchase instalment payment",  color:C.purple, bg:C.purpleBg },
 ];
 
-export default function CreditScreen({ collector }) {
-  const [step,       setStep]       = useState(1);
-  const [query,      setQuery]      = useState("");
-  const [searching,  setSearching]  = useState(false);
-  const [results,    setResults]    = useState([]);
-  const [account,    setAccount]    = useState(null);
-  const [collType,   setCollType]   = useState("savings");
-  const [amount,     setAmount]     = useState("");
-  const [notes,      setNotes]      = useState("");
-  const [submitting, setSubmitting] = useState(false);
+// Account type colours
+const ACC_TYPE = {
+  savings:      { label:"Savings",       color:"#16a34a", bg:"#dcfce7" },
+  current:      { label:"Current",       color:"#2563eb", bg:"#dbeafe" },
+  hire_purchase:{ label:"Hire Purchase", color:"#7c3aed", bg:"#ede9fe" },
+  joint:        { label:"Joint",         color:"#0891b2", bg:"#cffafe" },
+  fixed_deposit:{ label:"Fixed Deposit", color:"#b45309", bg:"#fef3c7" },
+  micro_savings:{ label:"Micro Savings", color:"#16a34a", bg:"#dcfce7" },
+  susu:         { label:"Susu",          color:"#be185d", bg:"#fce7f3" },
+};
+const accTypeInfo = (t) => {
+  if (!t) return { label: t || "Account", color:"#6b7280", bg:"#f3f4f6" };
+  if (t.startsWith("item_loan")) return { label: t.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()), color:"#ea580c", bg:"#ffedd5" };
+  return ACC_TYPE[t] || { label: (t||"").replace(/_/g," "), color:"#6b7280", bg:"#f3f4f6" };
+};
 
-  // ── Search ────────────────────────────────────────────────────────────────
+export default function CreditScreen({ collector }) {
+  const [step,        setStep]        = useState(1);
+  const [query,       setQuery]       = useState("");
+  const [searching,   setSearching]   = useState(false);
+  // step 1b: customer chosen, pick account
+  const [customer,    setCustomer]    = useState(null);
+  const [custAccounts,setCustAccounts]= useState([]);
+  const [account,     setAccount]     = useState(null);
+  const [collType,    setCollType]    = useState("savings");
+  const [amount,      setAmount]      = useState("");
+  const [notes,       setNotes]       = useState("");
+  const [submitting,  setSubmitting]  = useState(false);
+
+  // ── Search by name or account number ─────────────────────────────────────
   const searchAccount = async () => {
     const q = query.trim();
     if (!q) { Alert.alert("Required", "Enter an account number or customer name"); return; }
-    setSearching(true); setResults([]);
+    setSearching(true); setCustAccounts([]); setCustomer(null);
     try {
+      // Try account number first
       const { data: byAcct } = await supabase
         .from("accounts").select("id,account_number,balance,type,status,customer_id")
-        .ilike("account_number", "%" + q + "%").eq("status", "active").limit(10);
+        .ilike("account_number", "%" + q + "%").eq("status", "active").limit(20);
 
-      const { data: byName } = await supabase
-        .from("customers").select("id,name,phone").ilike("name", "%" + q + "%").limit(10);
-
-      let found = [];
       if (byAcct?.length) {
+        // Get all unique customers
         const ids = [...new Set(byAcct.map(a => a.customer_id).filter(Boolean))];
         let cm = {};
         if (ids.length) {
           const { data: custs } = await supabase.from("customers").select("id,name,phone").in("id", ids);
           (custs || []).forEach(c => { cm[c.id] = c; });
         }
-        found = byAcct.map(a => ({ ...a, customer: cm[a.customer_id] || null }));
-      }
-      if (!found.length && byName?.length) {
-        const ids = byName.map(c => c.id);
-        const { data: accts } = await supabase
-          .from("accounts").select("id,account_number,balance,type,status,customer_id")
-          .in("customer_id", ids).eq("status", "active").limit(10);
-        const cm = {};
-        byName.forEach(c => { cm[c.id] = c; });
-        found = (accts || []).map(a => ({ ...a, customer: cm[a.customer_id] || null }));
+        const found = byAcct.map(a => ({ ...a, customer: cm[a.customer_id] || null }));
+        if (found.length === 1) {
+          // Single account — go straight to step 2
+          setAccount(found[0]); setStep(2);
+        } else {
+          // Multiple accounts — group by customer, let collector pick account
+          const cust = found[0].customer;
+          setCustomer(cust);
+          setCustAccounts(found);
+          setStep("pick_account");
+        }
+        setSearching(false); return;
       }
 
-      if (!found.length) {
-        Alert.alert("Not Found", "No active account found.");
-      } else if (found.length === 1) {
-        setAccount(found[0]); setStep(2);
+      // Try customer name
+      const { data: byName } = await supabase
+        .from("customers").select("id,name,phone").ilike("name", "%" + q + "%").limit(10);
+
+      if (!byName?.length) {
+        Alert.alert("Not Found", "No customer or account found matching that search.");
+        setSearching(false); return;
+      }
+
+      if (byName.length === 1) {
+        // One customer — load all their accounts
+        await loadCustomerAccounts(byName[0]);
       } else {
-        setResults(found);
+        // Multiple customers — show customer picker
+        setCustomer(null);
+        setCustAccounts(byName.map(c => ({ ...c, _isCustomer: true })));
+        setStep("pick_customer");
       }
     } catch (e) { Alert.alert("Error", e.message || "Search failed"); }
     setSearching(false);
   };
 
+  const loadCustomerAccounts = async (cust) => {
+    setSearching(true);
+    try {
+      const { data: accts } = await supabase
+        .from("accounts").select("id,account_number,balance,type,status,customer_id")
+        .eq("customer_id", cust.id).eq("status", "active").order("type");
+      if (!accts?.length) {
+        Alert.alert("No Accounts", cust.name + " has no active accounts.");
+        setSearching(false); return;
+      }
+      const found = accts.map(a => ({ ...a, customer: cust }));
+      if (found.length === 1) {
+        setAccount(found[0]); setStep(2);
+      } else {
+        setCustomer(cust);
+        setCustAccounts(found);
+        setStep("pick_account");
+      }
+    } catch (e) { Alert.alert("Error", e.message || "Failed to load accounts"); }
+    setSearching(false);
+  };
+
   const reset = () => {
-    setStep(1); setQuery(""); setAccount(null); setResults([]);
-    setCollType("savings"); setAmount(""); setNotes("");
+    setStep(1); setQuery(""); setAccount(null); setCustomer(null);
+    setCustAccounts([]); setCollType("savings"); setAmount(""); setNotes("");
   };
 
   // ── Post ──────────────────────────────────────────────────────────────────
@@ -326,26 +377,28 @@ export default function CreditScreen({ collector }) {
           <Text style={S.headerTitle}>Record Collection</Text>
           <Text style={S.headerSub}>Post cash collection to customer account</Text>
           <View style={S.steps}>
-            {[{n:1,label:"Find Account"},{n:2,label:"Post Collection"}].map((s,i) => {
-              const active = step === s.n, done = step > s.n;
+            {[{n:1,label:"Find"},{n:"pick_account",label:"Account"},{n:2,label:"Post"}].map((s,i) => {
+              const active = step === s.n;
+              const done = (s.n === 1 && (step === "pick_customer" || step === "pick_account" || step === 2))
+                        || (s.n === "pick_account" && step === 2);
               return (
-                <React.Fragment key={s.n}>
+                <React.Fragment key={String(s.n)}>
                   <View style={S.stepItem}>
                     <View style={[S.stepDot, active && S.stepDotOn, done && S.stepDotDone]}>
                       <Text style={[S.stepDotTxt, (active||done) && {color:"#fff"}]}>
-                        {done ? "✓" : s.n}
+                        {done ? "✓" : i+1}
                       </Text>
                     </View>
                     <Text style={[S.stepLbl, active && S.stepLblOn, done && {color:C.brand}]}>{s.label}</Text>
                   </View>
-                  {i < 1 && <View style={[S.stepLine, done && {backgroundColor:C.brand}]} />}
+                  {i < 2 && <View style={[S.stepLine, done && {backgroundColor:C.brand}]} />}
                 </React.Fragment>
               );
             })}
           </View>
         </View>
 
-        {/* ── STEP 1 ── */}
+        {/* ── STEP 1: Search ── */}
         {step === 1 && (
           <View style={S.card}>
             <Text style={S.cardTitle}>Find Customer Account</Text>
@@ -357,7 +410,7 @@ export default function CreditScreen({ collector }) {
                 placeholder="Account number or name..."
                 placeholderTextColor={C.text4}
                 value={query}
-                onChangeText={v => { setQuery(v); setResults([]); }}
+                onChangeText={v => { setQuery(v); }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="search"
@@ -370,25 +423,73 @@ export default function CreditScreen({ collector }) {
                   : <Text style={S.searchBtnTxt}>Search</Text>}
               </TouchableOpacity>
             </View>
+          </View>
+        )}
 
-            {results.length > 0 && (
-              <View style={{marginTop:14}}>
-                <Text style={S.fieldLabel}>Select Account</Text>
-                {results.map(r => (
-                  <TouchableOpacity key={r.id} style={S.resultRow}
-                    onPress={() => { setAccount(r); setResults([]); setStep(2); }} activeOpacity={0.7}>
-                    <View style={S.resultAvatar}>
-                      <Text style={S.resultAvatarTxt}>{(r.customer?.name||"A")[0].toUpperCase()}</Text>
-                    </View>
-                    <View style={{flex:1}}>
-                      <Text style={S.resultName}>{r.customer?.name||"—"}</Text>
-                      <Text style={S.resultMeta}>{r.account_number} · {r.type}</Text>
-                    </View>
-                    <Text style={S.resultBal}>{GHS(r.balance)}</Text>
-                  </TouchableOpacity>
-                ))}
+        {/* ── STEP pick_customer: multiple customers found ── */}
+        {step === "pick_customer" && (
+          <View style={S.card}>
+            <Text style={S.cardTitle}>Select Customer</Text>
+            <Text style={S.cardSub}>Multiple customers found — tap to select</Text>
+            {custAccounts.map(c => (
+              <TouchableOpacity key={c.id} style={S.resultRow}
+                onPress={() => loadCustomerAccounts(c)} activeOpacity={0.7}>
+                <View style={S.resultAvatar}>
+                  <Text style={S.resultAvatarTxt}>{(c.name||"A")[0].toUpperCase()}</Text>
+                </View>
+                <View style={{flex:1}}>
+                  <Text style={S.resultName}>{c.name}</Text>
+                  <Text style={S.resultMeta}>{c.phone || "—"}</Text>
+                </View>
+                <Text style={{fontSize:18, color:C.text3}}>›</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={S.cancelBtn} onPress={reset}>
+              <Text style={S.cancelBtnTxt}>← Back to Search</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── STEP pick_account: customer has multiple accounts ── */}
+        {step === "pick_account" && customer && (
+          <View style={S.card}>
+            {/* Customer header */}
+            <View style={{flexDirection:"row", alignItems:"center", gap:12, marginBottom:16, paddingBottom:14, borderBottomWidth:1, borderBottomColor:C.borderLt}}>
+              <View style={[S.resultAvatar, {width:44, height:44, borderRadius:22}]}>
+                <Text style={[S.resultAvatarTxt, {fontSize:18}]}>{(customer.name||"A")[0].toUpperCase()}</Text>
               </View>
-            )}
+              <View style={{flex:1}}>
+                <Text style={{fontSize:15, fontWeight:"700", color:C.text}}>{customer.name}</Text>
+                <Text style={{fontSize:12, color:C.text4}}>{customer.phone || ""}</Text>
+              </View>
+            </View>
+
+            <Text style={S.cardTitle}>Select Account</Text>
+            <Text style={S.cardSub}>This customer has {custAccounts.length} active accounts — choose which to post against</Text>
+
+            {custAccounts.map(a => {
+              const ti = accTypeInfo(a.type);
+              return (
+                <TouchableOpacity key={a.id} style={[S.acctPickRow, {borderColor: ti.color + "40"}]}
+                  onPress={() => { setAccount(a); setStep(2); }} activeOpacity={0.75}>
+                  <View style={[S.acctPickBadge, {backgroundColor: ti.bg}]}>
+                    <Text style={[S.acctPickBadgeTxt, {color: ti.color}]}>{ti.label}</Text>
+                  </View>
+                  <View style={{flex:1}}>
+                    <Text style={S.acctPickNum}>{a.account_number}</Text>
+                    <Text style={[S.acctPickType, {color: ti.color}]}>{ti.label}</Text>
+                  </View>
+                  <View style={{alignItems:"flex-end"}}>
+                    <Text style={S.acctPickBal}>{GHS(a.balance)}</Text>
+                    <Text style={{fontSize:10, color:C.text4}}>balance</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity style={S.cancelBtn} onPress={reset}>
+              <Text style={S.cancelBtnTxt}>← Back to Search</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -563,6 +664,14 @@ const S = StyleSheet.create({
 
   // Notes
   notesInput:    { backgroundColor:C.bg, borderWidth:1, borderColor:C.border, borderRadius:10, paddingHorizontal:14, paddingVertical:12, fontSize:14, color:C.text, minHeight:68, textAlignVertical:"top" },
+
+  // Account picker
+  acctPickRow:     { flexDirection:"row", alignItems:"center", gap:12, padding:14, borderRadius:12, borderWidth:1.5, borderColor:C.border, marginBottom:8, backgroundColor:C.bg },
+  acctPickBadge:   { paddingHorizontal:10, paddingVertical:5, borderRadius:8, minWidth:70, alignItems:"center" },
+  acctPickBadgeTxt:{ fontSize:11, fontWeight:"700" },
+  acctPickNum:     { fontSize:13, fontWeight:"700", color:C.text, marginBottom:2 },
+  acctPickType:    { fontSize:11, fontWeight:"600" },
+  acctPickBal:     { fontSize:14, fontWeight:"800", color:C.text },
 
   // Buttons
   postBtn:       { borderRadius:12, paddingVertical:15, alignItems:"center", marginTop:20, elevation:1 },

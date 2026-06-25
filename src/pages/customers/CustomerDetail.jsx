@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import Badge from '../../components/ui/Badge';
 import { ArrowLeft, Phone, Mail, MapPin, Briefcase, CreditCard, ShoppingBag, Smartphone } from 'lucide-react';
+import { accountTypeLabel } from '../../core/normalize';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
@@ -90,7 +91,7 @@ export default function CustomerDetail() {
                 <div key={a.id} style={{ padding: 14, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
-                      <div style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>{a.type?.replace('_', ' ')}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>{accountTypeLabel(a, accounts)}</div>
                       <div style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700, marginTop: 2 }}>{a.accountNumber}</div>
                     </div>
                     <Badge status={a.status} />

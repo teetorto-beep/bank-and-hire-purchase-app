@@ -2,24 +2,25 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import Badge from '../../components/ui/Badge';
-import { Search, Plus, Eye, Lock, Unlock } from 'lucide-react';
+import { Search, Plus, Eye, Lock, Unlock, Download, Upload } from 'lucide-react';
+import Papa from 'papaparse';
+import { accountTypeLabel } from '../../core/normalize';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
-
-// Helper — Supabase returns snake_case; handle both
 const field = (obj, snake, camel) => obj?.[snake] ?? obj?.[camel];
 
 export default function Accounts() {
-  const { accounts, loans, updateAccount } = useApp();
+  const { accounts, loans, customers, updateAccount } = useApp();
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadingCSV, setUploadingCSV] = useState(false);
 
   // Supabase join returns customer data as `customers` (table name)
   const enriched = useMemo(() =>
     accounts.map(a => ({
       ...a,
-      // support both joined object names
       _customer: a.customers || a.customer || null,
       _accountNumber: field(a, 'account_number', 'accountNumber'),
       _customerId: field(a, 'customer_id', 'customerId'),
@@ -42,6 +43,58 @@ export default function Accounts() {
   const toggleFreeze = (a) =>
     updateAccount(a.id, { status: a.status === 'frozen' ? 'active' : 'frozen' });
 
+  // ── Download accounts as CSV ──────────────────────────────────────────────
+  const downloadCSV = () => {
+    const rows = filtered.map((a, i) => ({
+      '#': i + 1,
+      'Account Number': a._accountNumber || '',
+      'Customer Name': a._customer?.name || '',
+      'Customer Phone': a._customer?.phone || '',
+      'Type': a.type || '',
+      'Balance': a.balance ?? 0,
+      'Interest Rate': a._interestRate ?? 0,
+      'Status': a.status || '',
+      'Opened At': a._openedAt ? new Date(a._openedAt).toLocaleDateString() : '',
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `accounts-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  // ── Upload accounts from CSV (update status/interest rate only — safe) ────
+  const handleUploadCSV = (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    setUploadingCSV(true); setUploadResult(null);
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: async (res) => {
+        let updated = 0, skipped = 0;
+        for (const row of res.data) {
+          const acctNum = (row['Account Number'] || row['account_number'] || '').trim();
+          if (!acctNum) { skipped++; continue; }
+          const acct = accounts.find(a => (a.account_number || a.accountNumber) === acctNum);
+          if (!acct) { skipped++; continue; }
+          const patch = {};
+          if (row['Status'] && ['active','frozen','dormant','closed'].includes(row['Status'].toLowerCase()))
+            patch.status = row['Status'].toLowerCase();
+          if (row['Interest Rate'] && !isNaN(parseFloat(row['Interest Rate'])))
+            patch.interest_rate = parseFloat(row['Interest Rate']);
+          if (Object.keys(patch).length === 0) { skipped++; continue; }
+          const result = await updateAccount(acct.id, patch);
+          if (result?.error) skipped++; else updated++;
+        }
+        setUploadResult({ updated, skipped });
+        setUploadingCSV(false);
+        e.target.value = '';
+      },
+      error: () => { setUploadingCSV(false); setUploadResult({ updated: 0, skipped: 0, error: 'Failed to parse CSV.' }); },
+    });
+  };
+
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -50,11 +103,32 @@ export default function Accounts() {
           <div className="page-desc">{accounts.length} total accounts</div>
         </div>
         <div className="page-header-right">
+          <button className="btn btn-secondary btn-sm" onClick={downloadCSV} title="Download accounts as CSV">
+            <Download size={14} /> Download CSV
+          </button>
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }} title="Upload CSV to update account status/interest rate">
+            <Upload size={14} /> {uploadingCSV ? 'Importing…' : 'Upload CSV'}
+            <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleUploadCSV} disabled={uploadingCSV} />
+          </label>
           <button className="btn btn-primary" onClick={() => navigate('/accounts/open')}>
             <Plus size={15} />Open Account
           </button>
         </div>
       </div>
+
+      {/* Upload result */}
+      {uploadResult && (
+        <div className={`alert ${uploadResult.error ? 'alert-error' : 'alert-success'}`} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <span>
+              {uploadResult.error
+                ? uploadResult.error
+                : <><strong>CSV Import:</strong> {uploadResult.updated} updated, {uploadResult.skipped} skipped.</>}
+            </span>
+            <button onClick={() => setUploadResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>×</button>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -107,7 +181,7 @@ export default function Accounts() {
                       <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{a._customer?.phone || ''}</div>
                     </td>
                     <td>
-                      <Badge status={a.type} label={a.type?.replace(/_/g, ' ')} />
+                      <Badge status={a.type} label={accountTypeLabel(a, accounts)} />
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>
                       <div style={{ color: a.balance < 0 ? 'var(--red)' : 'var(--text)' }}>{GHS(a.balance)}</div>
@@ -154,6 +228,9 @@ export default function Accounts() {
               })}
             </tbody>
           </table>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 10 }}>
+          CSV upload updates: <code>Status</code> (active/frozen/dormant/closed) and <code>Interest Rate</code> by <code>Account Number</code>
         </div>
       </div>
     </div>

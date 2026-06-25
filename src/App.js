@@ -27,6 +27,7 @@ import CollectionReport from './pages/collectors/CollectionReport';
 import BankProducts from './pages/products/BankProducts';
 import HPItems from './pages/hirepurchase/HPItems';
 import HPAgreements from './pages/hirepurchase/HPAgreements';
+import HPLoanItems from './pages/hirepurchase/HPLoanItems';
 import UserManagement from './pages/users/UserManagement';
 import Reports from './pages/reports/Reports';
 import TellerSession from './pages/teller/TellerSession';
@@ -57,6 +58,7 @@ const ROUTE_MODULE_MAP = {
   '/loans/calculator':       'Loans',
   '/hp/items':               'HP Items',
   '/hp/agreements':          'Loans',
+  '/hp/loan-items':          'Loans',
   '/collectors':             'Collections',
   '/collections/record':     'Collections',
   '/collections/report':     'Collections',
@@ -120,8 +122,31 @@ function AppShell({ user, onLogout }) {
 }
 
 function AppContent({ user, onLogout }) {
-  const { lastRefresh } = useApp();
+  const { lastRefresh, loading } = useApp();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
+
+  // Show animated data-loading overlay on first load
+  if (loading) return (
+    <div style={{
+      height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0f172a 100%)',
+      flexDirection: 'column', gap: 24,
+    }}>
+      <div style={{ animation: 'splash-in 0.5s cubic-bezier(0.34,1.56,0.64,1) both' }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}>
+          <div style={{ position: 'absolute', inset: -10, borderRadius: '50%', border: '2px solid rgba(26,86,219,0.4)', animation: 'ring-spin 2.5s linear infinite' }} />
+          <div style={{ width: 64, height: 64, background: 'linear-gradient(135deg, #1a56db, #7c3aed)', borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 900, color: '#fff', boxShadow: '0 0 32px rgba(26,86,219,0.5)' }}>M</div>
+        </div>
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ color: '#fff', fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Majupat Love Enterprise</div>
+          <div style={{ color: '#64748b', fontSize: 12 }}>Loading your data…</div>
+        </div>
+        <div style={{ width: 220, height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 99, overflow: 'hidden', margin: '0 auto' }}>
+          <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, #1a56db, #7c3aed, #10b981, #1a56db)', animation: 'loading-bar 1.6s ease-in-out infinite', backgroundSize: '300% 100%' }} />
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -153,6 +178,7 @@ function AppContent({ user, onLogout }) {
               <Route path="/loans/calculator" element={<ProtectedRoute user={user} path="/loans/calculator" element={<LoanCalculator />} onLogout={onLogout} />} />
               <Route path="/hp/items" element={<ProtectedRoute user={user} path="/hp/items" element={<HPItems />} onLogout={onLogout} />} />
               <Route path="/hp/agreements" element={<ProtectedRoute user={user} path="/hp/agreements" element={<HPAgreements />} onLogout={onLogout} />} />
+              <Route path="/hp/loan-items" element={<ProtectedRoute user={user} path="/hp/loan-items" element={<HPLoanItems />} onLogout={onLogout} />} />
               <Route path="/collectors" element={<ProtectedRoute user={user} path="/collectors" element={<Collectors />} onLogout={onLogout} />} />
               <Route path="/collections/record" element={<ProtectedRoute user={user} path="/collections/record" element={<RecordCollection />} onLogout={onLogout} />} />
               <Route path="/collections/report" element={<ProtectedRoute user={user} path="/collections/report" element={<CollectionReport />} onLogout={onLogout} />} />
@@ -196,9 +222,64 @@ export default function App() {
   }, []);
 
   if (!ready) return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', flexDirection: 'column', gap: 16 }}>
-      <div style={{ width: 48, height: 48, background: '#1a56db', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800, color: '#fff' }}>M</div>
-      <div style={{ color: '#94a3b8', fontSize: 14 }}>Loading Majupat Love Enterprise…</div>
+    <div style={{
+      height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0f172a 100%)',
+      flexDirection: 'column', gap: 0, overflow: 'hidden', position: 'relative',
+    }}>
+      {/* Animated background orbs */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle, rgba(26,86,219,0.15) 0%, transparent 70%)', top: '10%', left: '15%', animation: 'pulse-orb 4s ease-in-out infinite' }} />
+        <div style={{ position: 'absolute', width: 300, height: 300, borderRadius: '50%', background: 'radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 70%)', bottom: '15%', right: '20%', animation: 'pulse-orb 4s ease-in-out infinite 1.5s' }} />
+        <div style={{ position: 'absolute', width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%)', top: '50%', right: '10%', animation: 'pulse-orb 4s ease-in-out infinite 3s' }} />
+      </div>
+
+      {/* Logo card */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, animation: 'splash-in 0.6s cubic-bezier(0.34,1.56,0.64,1) both' }}>
+        {/* Logo mark with ring */}
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', inset: -8, borderRadius: '50%', border: '2px solid rgba(26,86,219,0.3)', animation: 'ring-spin 3s linear infinite' }} />
+          <div style={{ position: 'absolute', inset: -16, borderRadius: '50%', border: '1px solid rgba(26,86,219,0.15)', animation: 'ring-spin 5s linear infinite reverse' }} />
+          <div style={{
+            width: 72, height: 72, background: 'linear-gradient(135deg, #1a56db, #7c3aed)',
+            borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 30, fontWeight: 900, color: '#fff',
+            boxShadow: '0 0 40px rgba(26,86,219,0.5), 0 0 80px rgba(26,86,219,0.2)',
+          }}>M</div>
+        </div>
+
+        {/* Company name */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ color: '#fff', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 4 }}>
+            Majupat Love Enterprise
+          </div>
+          <div style={{ color: '#64748b', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            Banking &amp; Hire Purchase System
+          </div>
+        </div>
+
+        {/* Animated progress bar */}
+        <div style={{ width: 200, height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 99, overflow: 'hidden' }}>
+          <div style={{ height: '100%', borderRadius: 99, background: 'linear-gradient(90deg, #1a56db, #7c3aed, #10b981)', animation: 'loading-bar 1.8s ease-in-out infinite', backgroundSize: '200% 100%' }} />
+        </div>
+
+        {/* Loading dots */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{
+              width: 6, height: 6, borderRadius: '50%', background: '#1a56db',
+              animation: `dot-bounce 1.2s ease-in-out infinite`,
+              animationDelay: `${i * 0.2}s`,
+            }} />
+          ))}
+          <span style={{ color: '#475569', fontSize: 12, marginLeft: 8 }}>Loading…</span>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div style={{ position: 'absolute', bottom: 24, color: '#334155', fontSize: 11, textAlign: 'center' }}>
+        Powered by Maxbraynn Technology &amp; Systems
+      </div>
     </div>
   );
 

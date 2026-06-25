@@ -90,8 +90,15 @@ export function AppProvider({ children }) {
   }, []);
 
   // ── Auto-refresh every 2 seconds (more aggressive polling) ────────────
+  // pausePolling ref — set to true by any page that needs stable state (e.g. multi-step forms)
+  const pausePollingRef = React.useRef(false);
+  const pausePolling = useCallback(() => { pausePollingRef.current = true; }, []);
+  const resumePolling = useCallback(() => { pausePollingRef.current = false; }, []);
+
   useEffect(() => {
-    const id = setInterval(silentRefresh, 2000); // Changed from 5000 to 2000
+    const id = setInterval(() => {
+      if (!pausePollingRef.current) silentRefresh();
+    }, 2000);
     return () => clearInterval(id);
   }, [silentRefresh]);
 
@@ -445,7 +452,7 @@ export function AppProvider({ children }) {
       loading, lastRefresh, customers, accounts, transactions, loans, collectors, collections,
       products, hpItems, hpAgreements, hpPayments, pendingTxns, deductionRules, auditLog,
       pendingApprovals, users,
-      stats, refresh, silentRefresh,
+      stats, refresh, silentRefresh, pausePolling, resumePolling,
       addCustomer, updateCustomer,
       openAccount, updateAccount,
       postTransaction, reverseTransaction,

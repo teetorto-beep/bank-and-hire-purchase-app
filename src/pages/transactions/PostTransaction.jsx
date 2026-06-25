@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { CheckCircle, ArrowLeft, Search, Clock, AlertCircle, Send, ArrowRightLeft, BookOpen } from 'lucide-react';
 import { authDB } from '../../core/db';
 import { loadApprovalRules, requiresApproval } from '../../core/approvalRules';
+import { supabase } from '../../core/supabase';
 
 const GHS = n => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 
@@ -43,6 +44,8 @@ export default function PostTransaction({ hideModes = [] }) {
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState('');
   const [done,    setDone]    = useState(null);
+  // Live HP agreements fetched directly from Supabase when account is selected
+  const [liveHP,  setLiveHP]  = useState([]);
 
   const f  = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
   const fb = k => e => setForm(p => ({ ...p, [k]: e.target.checked }));
@@ -96,11 +99,35 @@ export default function PostTransaction({ hideModes = [] }) {
   const activeLoans = useMemo(() =>
     loans.filter(l => (l.customer_id || l.customerId) === customerId && l.status === 'active'),
     [loans, customerId]);
-  const activeHP = useMemo(() =>
-    hpAgreements.filter(a => (a.customer_id || a.customerId) === customerId && a.status === 'active'),
-    [hpAgreements, customerId]);
+  // Use liveHP (fetched directly from Supabase) — context may be stale
+  const activeHP = useMemo(() => {
+    if (liveHP.length > 0) return liveHP;
+    // Fallback to context with dual match
+    const loanIds = new Set(activeLoans.map(l => l.id));
+    return hpAgreements.filter(a =>
+      a.status === 'active' && (
+        (a.customer_id || a.customerId) === customerId ||
+        loanIds.has(a.loan_id || a.loanId)
+      )
+    );
+  }, [liveHP, hpAgreements, customerId, activeLoans]);
 
-  const selectAccount = a => { setSelAcc(a); setSearch(a.account_number || a.accountNumber || ''); setError(''); };
+  const selectAccount = async a => {
+    setSelAcc(a);
+    setSearch(a.account_number || a.accountNumber || '');
+    setError('');
+    setLiveHP([]);
+    // Fetch HP agreements directly from Supabase — bypasses stale context
+    const custId = a.customer_id || a.customerId;
+    if (custId) {
+      const { data } = await supabase
+        .from('hp_agreements')
+        .select('*, hp_items(name, image)')
+        .eq('customer_id', custId)
+        .eq('status', 'active');
+      setLiveHP(data || []);
+    }
+  };
   const selectToAccount = a => setForm(p => ({
     ...p, toAccId: a.id, toAcc: a,
     toSearch: a.account_number || a.accountNumber || '',
@@ -108,6 +135,7 @@ export default function PostTransaction({ hideModes = [] }) {
   }));
 
   const handleLinkedId = (id) => {
+    setError('');
     setForm(p => {
       if (p.paymentMode === 'loan') {
         const loan = activeLoans.find(l => l.id === id);
@@ -129,7 +157,7 @@ export default function PostTransaction({ hideModes = [] }) {
     });
   };
 
-  const reset = () => { setSearch(''); setSelAcc(null); setForm(EMPTY_FORM); setDone(null); setError(''); };
+  const reset = () => { setSearch(''); setSelAcc(null); setLiveHP([]); setForm(EMPTY_FORM); setDone(null); setError(''); };
 
   const submit = async e => {
     e.preventDefault();
@@ -148,10 +176,11 @@ export default function PostTransaction({ hideModes = [] }) {
       if (!finalNarr.trim() && mode !== 'loan' && mode !== 'hp') { setError('Enter a narration.'); return; }
       if (mode === 'loan' && !form.linkedId) { setError('Select a loan.'); return; }
       if (mode === 'hp'   && !form.linkedId) { setError('Select an HP agreement.'); return; }
-      // For loan/HP: always debit from account — check balance
-      if ((mode === 'loan' || mode === 'hp') && balance < amount) {
+      // For loan repayments: debit from account — check balance
+      if (mode === 'loan' && balance < amount) {
         setError(`Insufficient balance. Account has ${GHS(balance)}, payment is ${GHS(amount)}.`); return;
       }
+      // HP payments are cash — no account balance check needed
       if (mode === 'regular' && form.type === 'debit' && balance < amount) {
         setError(`Insufficient balance. Available: ${GHS(balance)}`); return;
       }
@@ -182,6 +211,71 @@ export default function PostTransaction({ hideModes = [] }) {
         setDone({ type: 'gl', amount, acc: selAcc, glCode: form.glCode });
 
       } else {
+        // ── HP Payment: insert transaction directly + update HP/loan ─────────
+        if (mode === 'hp') {
+          const agr = activeHP.find(a => a.id === form.linkedId);
+          const narration = finalNarr.trim() || `HP Repayment – ${agr?.item_name || agr?.itemName || agr?.id?.slice(-6) || 'HP'}`;
+
+          // 1. Insert transaction record — DEBIT (HP repayment reduces account/records payment)
+          const ref = 'HP' + Date.now() + Math.random().toString(36).slice(2,6).toUpperCase();
+          const newBalance = Number(selAcc.balance || 0); // balance unchanged — HP is cash, not from account
+          const { data: txn, error: txnErr } = await supabase.from('transactions').insert({
+            account_id:       selAcc.id,
+            type:             'debit',
+            amount,
+            narration,
+            reference:        ref,
+            balance_after:    newBalance,
+            channel:          'teller',
+            status:           'completed',
+            poster_name:      user?.name || 'Teller',
+            hp_agreement_id:  form.linkedId,
+            loan_id:          form.linkedLoanId || null,
+          }).select().single();
+
+          if (txnErr) { setError(txnErr.message || 'HP payment failed.'); setSaving(false); return; }
+
+          // Do NOT update account balance — HP payment is cash, not debited from account
+
+          // 2. Update HP agreement
+          const newPaid      = Number(agr?.total_paid || 0) + amount;
+          const newRemaining = Math.max(0, Number(agr?.remaining || 0) - amount);
+          await supabase.from('hp_agreements').update({
+            total_paid:        newPaid,
+            remaining:         newRemaining,
+            status:            newRemaining <= 0 ? 'completed' : 'active',
+            last_payment_date: new Date().toISOString(),
+            updated_at:        new Date().toISOString(),
+          }).eq('id', form.linkedId);
+
+          // 3. Record in hp_payments
+          await supabase.from('hp_payments').insert({
+            agreement_id: form.linkedId,
+            amount,
+            remaining:    newRemaining,
+            note:         narration,
+            collected_by: user?.name || 'Teller',
+          });
+
+          // 4. Reduce linked loan outstanding
+          if (form.linkedLoanId) {
+            const { data: loan } = await supabase.from('loans').select('outstanding,status').eq('id', form.linkedLoanId).single();
+            if (loan) {
+              const newOut = Math.max(0, Number(loan.outstanding) - amount);
+              await supabase.from('loans').update({
+                outstanding:       newOut,
+                status:            newOut <= 0 ? 'completed' : loan.status,
+                last_payment_date: new Date().toISOString(),
+                updated_at:        new Date().toISOString(),
+              }).eq('id', form.linkedLoanId);
+            }
+          }
+
+          setDone({ type: 'posted', txn, acc: { ...selAcc, balance: newBalance }, customer: selCustomer });
+          setSaving(false);
+          return;
+        }
+
         const payload = {
           account_id: selAcc.id, accountId: selAcc.id,
           type: form.type, amount,
@@ -189,8 +283,6 @@ export default function PostTransaction({ hideModes = [] }) {
           channel: 'teller',
           ...(mode === 'loan' && form.linkedId   ? { loan_id: form.linkedId } : {}),
           ...(mode === 'loan' && form.linkedHpId ? { hp_agreement_id: form.linkedHpId } : {}),
-          ...(mode === 'hp'   && form.linkedId   ? { hp_agreement_id: form.linkedId } : {}),
-          ...(mode === 'hp'   && form.linkedLoanId ? { loan_id: form.linkedLoanId } : {}),
         };
         if (willAuth) {
           const { data, error: err } = await submitForApproval(payload);
@@ -342,9 +434,19 @@ export default function PostTransaction({ hideModes = [] }) {
                 style={{ padding: '11px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                 onMouseLeave={e => e.currentTarget.style.background = ''}>
-                <div>
-                  <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 14 }}>{a.account_number || a.accountNumber}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{a.customer?.name} · {a.customer?.phone} · {(a.type||'').replace(/_/g,' ')}</div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  {/* Account type badge — makes it impossible to pick wrong account */}
+                  <div style={{
+                    padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap',
+                    background: a.type === 'savings' ? '#dcfce7' : a.type === 'hire_purchase' ? '#ede9fe' : a.type === 'current' ? '#dbeafe' : '#f3f4f6',
+                    color: a.type === 'savings' ? '#16a34a' : a.type === 'hire_purchase' ? '#7c3aed' : a.type === 'current' ? '#2563eb' : '#374151',
+                  }}>
+                    {(a.type || 'account').replace(/_/g, ' ')}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 14 }}>{a.account_number || a.accountNumber}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>{a.customer?.name} · {a.customer?.phone}</div>
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontWeight: 800 }}>{GHS(a.balance)}</div>
@@ -386,7 +488,7 @@ export default function PostTransaction({ hideModes = [] }) {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {PAYMENT_MODES.filter(m => !hideModes.includes(m.id)).map(m => (
                   <div key={m.id}
-                    onClick={() => setForm(p => ({ ...EMPTY_FORM, paymentMode: m.id, type: ['loan','hp','gl'].includes(m.id) ? 'debit' : p.type }))}
+                    onClick={() => { setError(''); setForm(p => ({ ...EMPTY_FORM, paymentMode: m.id, type: ['loan','hp','gl'].includes(m.id) ? 'debit' : p.type })); }}
                     style={{
                       flex: 1, minWidth: 100, padding: '10px 8px', borderRadius: 10, cursor: 'pointer', textAlign: 'center',
                       border: `2px solid ${mode === m.id ? 'var(--brand)' : 'var(--border)'}`,
@@ -551,20 +653,18 @@ export default function PostTransaction({ hideModes = [] }) {
                           </option>
                         ))}
                       </select>
-                      {/* HP + account context card */}
+                      {/* HP context card — cash payment, no balance check */}
                       {form.linkedId && (() => {
                         const agr = activeHP.find(a => a.id === form.linkedId);
                         if (!agr) return null;
-                        const suggested = Number(agr.suggestedPayment || 0);
+                        const suggested = Number(agr.suggestedPayment || agr.suggested_payment || 0);
                         const remaining = Number(agr.remaining || 0);
-                        const maxPayable = Math.min(balance, remaining);
                         return (
                           <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
                               {[
-                                ['Account Balance', GHS(balance),   balance > 0 ? 'var(--green)' : 'var(--red)'],
-                                ['HP Remaining',    GHS(remaining),  remaining > 0 ? 'var(--red)' : 'var(--green)'],
-                                ['Max Payable',     GHS(maxPayable), 'var(--brand)'],
+                                ['HP Remaining', GHS(remaining), remaining > 0 ? 'var(--red)' : 'var(--green)'],
+                                ['Suggested',    GHS(suggested), 'var(--brand)'],
                               ].map(([l, v, c]) => (
                                 <div key={l} style={{ padding: '10px 14px', borderRight: '1px solid var(--border)' }}>
                                   <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>{l}</div>
@@ -574,30 +674,19 @@ export default function PostTransaction({ hideModes = [] }) {
                             </div>
                             <div style={{ padding: '10px 14px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                               <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>Quick fill:</span>
-                              {suggested > 0 && suggested <= balance && (
+                              {suggested > 0 && (
                                 <button type="button" className="btn btn-secondary btn-sm"
                                   onClick={() => setForm(p => ({ ...p, amount: String(suggested) }))}>
                                   Suggested {GHS(suggested)}
                                 </button>
                               )}
-                              {maxPayable > 0 && maxPayable !== suggested && (
-                                <button type="button" className="btn btn-secondary btn-sm"
-                                  onClick={() => setForm(p => ({ ...p, amount: String(maxPayable) }))}>
-                                  Max payable {GHS(maxPayable)}
-                                </button>
-                              )}
-                              {remaining > 0 && remaining <= balance && remaining !== suggested && (
+                              {remaining > 0 && remaining !== suggested && (
                                 <button type="button" className="btn btn-primary btn-sm"
                                   onClick={() => setForm(p => ({ ...p, amount: String(remaining) }))}>
                                   Full remaining {GHS(remaining)}
                                 </button>
                               )}
                             </div>
-                            {balance < suggested && (
-                              <div style={{ padding: '8px 14px', background: 'var(--yellow-bg)', fontSize: 12, color: '#92400e', borderTop: '1px solid var(--border)' }}>
-                                ⚠️ Balance ({GHS(balance)}) is less than suggested ({GHS(suggested)}). You can still make a partial payment.
-                              </div>
-                            )}
                           </div>
                         );
                       })()}
@@ -629,9 +718,9 @@ export default function PostTransaction({ hideModes = [] }) {
             <div className="form-group">
               <label className="form-label">Amount (GH₵) <span className="required">*</span></label>
               <input className="form-control" type="number" min="0.01" step="0.01"
-                value={form.amount} onChange={f('amount')} placeholder="0.00"
+                value={form.amount} onChange={e => { setError(''); setForm(p => ({ ...p, amount: e.target.value })); }} placeholder="0.00"
                 style={{ fontSize: 22, fontWeight: 800, textAlign: 'center' }} />
-              {/* Loan/HP mode: show both account balance after AND loan outstanding after */}
+              {/* Loan/HP mode: show outstanding after only (HP = cash, no account balance check) */}
               {(mode === 'loan' || mode === 'hp') && amount > 0 && form.linkedId && (() => {
                 const linked = mode === 'loan'
                   ? activeLoans.find(l => l.id === form.linkedId)
@@ -640,12 +729,15 @@ export default function PostTransaction({ hideModes = [] }) {
                 const balAfter = balance - amount;
                 const outAfter = Math.max(0, outstanding - amount);
                 return (
-                  <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div style={{ padding: '8px 12px', borderRadius: 8, background: balAfter < 0 ? 'var(--red-bg)' : 'var(--green-bg)', border: `1px solid ${balAfter < 0 ? 'var(--red)' : 'var(--green)'}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: balAfter < 0 ? 'var(--red)' : 'var(--green)', textTransform: 'uppercase', marginBottom: 2 }}>Account Balance After</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: balAfter < 0 ? 'var(--red)' : 'var(--green)' }}>{GHS(balAfter)}</div>
-                      {balAfter < 0 && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>Insufficient funds</div>}
-                    </div>
+                  <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: mode === 'hp' ? '1fr' : '1fr 1fr', gap: 8 }}>
+                    {/* Only show account balance for loan repayments, not HP (HP is cash) */}
+                    {mode === 'loan' && (
+                      <div style={{ padding: '8px 12px', borderRadius: 8, background: balAfter < 0 ? 'var(--red-bg)' : 'var(--green-bg)', border: `1px solid ${balAfter < 0 ? 'var(--red)' : 'var(--green)'}` }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: balAfter < 0 ? 'var(--red)' : 'var(--green)', textTransform: 'uppercase', marginBottom: 2 }}>Account Balance After</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: balAfter < 0 ? 'var(--red)' : 'var(--green)' }}>{GHS(balAfter)}</div>
+                        {balAfter < 0 && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>Insufficient funds</div>}
+                      </div>
+                    )}
                     <div style={{ padding: '8px 12px', borderRadius: 8, background: outAfter <= 0 ? 'var(--green-bg)' : 'var(--yellow-bg)', border: `1px solid ${outAfter <= 0 ? 'var(--green)' : 'var(--yellow)'}` }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: outAfter <= 0 ? 'var(--green)' : 'var(--yellow)', textTransform: 'uppercase', marginBottom: 2 }}>{mode === 'hp' ? 'HP Remaining After' : 'Loan Outstanding After'}</div>
                       <div style={{ fontSize: 15, fontWeight: 800, color: outAfter <= 0 ? 'var(--green)' : '#92400e' }}>{GHS(outAfter)}</div>

@@ -3,13 +3,15 @@ import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
-import { Search, Plus, Eye, Edit2, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Search, Plus, Eye, Edit2, CheckCircle, Clock, AlertCircle, Download, Upload, Trash2 } from 'lucide-react';
 import { authDB } from '../../core/db';
+import { supabase } from '../../core/supabase';
+import Papa from 'papaparse';
 
 const EMPTY = { name: '', email: '', phone: '', ghanaCard: '', dob: '', address: '', occupation: '', employer: '', monthlyIncome: '', app_username: '', app_password: '' };
 
 export default function Customers() {
-  const { customers, addCustomer, updateCustomer, submitApproval, pendingApprovals } = useApp();
+  const { customers, addCustomer, updateCustomer, submitApproval, pendingApprovals, refresh } = useApp();
   const navigate = useNavigate();
   const user = authDB.currentUser();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
@@ -21,6 +23,20 @@ export default function Customers() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [uploadingCSV, setUploadingCSV] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const deleteCustomer = async (c) => {
+    if (!window.confirm(`Delete "${c.name}"? This cannot be undone.`)) return;
+    setDeletingId(c.id);
+    try {
+      const { error } = await supabase.from('customers').delete().eq('id', c.id);
+      if (error) { alert('Delete failed: ' + error.message); }
+      else await refresh();
+    } catch (e) { alert('Delete failed: ' + e.message); }
+    setDeletingId(null);
+  };
 
   const pendingCustomers = (pendingApprovals || []).filter(p => p.type === 'customer' && p.status === 'pending');
 
@@ -40,18 +56,15 @@ export default function Customers() {
     setSaving(true); setError('');
     try {
       if (editing) {
-        // Edits go direct (admin only action)
         const result = await updateCustomer(editing.id, form);
         if (result?.error) { setError(result.error?.message || 'Failed to update.'); setSaving(false); return; }
         setModal(false);
       } else {
         if (isAdmin) {
-          // Admin creates directly
           const result = await addCustomer(form);
           if (result?.error) { setError(result.error?.message || 'Failed to save.'); setSaving(false); return; }
           setModal(false);
         } else {
-          // Teller/others submit for approval
           const result = await submitApproval('customer', form);
           if (result?.error) { setError(result.error?.message || 'Failed to submit.'); setSaving(false); return; }
           setSubmitted(true);
@@ -59,6 +72,79 @@ export default function Customers() {
       }
     } catch (err) { setError(err.message || 'Unexpected error'); }
     setSaving(false);
+  };
+
+  // ── Download customers as CSV ─────────────────────────────────────────────
+  const downloadCSV = () => {
+    const rows = filtered.map((c, i) => ({
+      '#': i + 1,
+      'Name': c.name || '',
+      'Phone': c.phone || '',
+      'Email': c.email || '',
+      'Ghana Card': c.ghana_card || c.ghanaCard || '',
+      'Date of Birth': c.dob || '',
+      'Address': c.address || '',
+      'Occupation': c.occupation || '',
+      'Employer': c.employer || '',
+      'Monthly Income': c.monthly_income || c.monthlyIncome || '',
+      'KYC Status': c.kyc_status || c.kycStatus || '',
+      'Joined': c.created_at || c.createdAt ? new Date(c.created_at || c.createdAt).toLocaleDateString() : '',
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `customers-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  // ── Upload customers from CSV ─────────────────────────────────────────────
+  const handleUploadCSV = (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    setUploadingCSV(true); setUploadResult(null);
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: async (res) => {
+        if (!res.data?.length) {
+          setUploadResult({ added: 0, skipped: 0, errors: ['CSV file is empty or has no valid rows.'] });
+          setUploadingCSV(false);
+          return;
+        }
+        let added = 0, skipped = 0, errors = [];
+        for (const row of res.data) {
+          const name  = (row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '').trim();
+          const phone = (row['Phone'] || row['phone'] || row['Phone Number'] || '').trim();
+          if (!name || !phone) { skipped++; continue; }
+          const payload = {
+            name,
+            phone,
+            email:         (row['Email'] || row['email'] || '').trim() || null,
+            ghanaCard:     (row['Ghana Card'] || row['ghana_card'] || row['GhanaCard'] || '').trim() || null,
+            dob:           (row['Date of Birth'] || row['dob'] || row['DOB'] || '').trim() || null,
+            address:       (row['Address'] || row['address'] || '').trim() || null,
+            occupation:    (row['Occupation'] || row['occupation'] || '').trim() || null,
+            employer:      (row['Employer'] || row['employer'] || '').trim() || null,
+            monthlyIncome: parseFloat(row['Monthly Income'] || row['monthly_income'] || 0) || null,
+            kycStatus:     'pending',
+          };
+          const result = await addCustomer(payload);
+          if (result?.error) {
+            errors.push(`${name}: ${result.error.message}`);
+            skipped++;
+          } else {
+            added++;
+          }
+        }
+        setUploadResult({ added, skipped, errors });
+        setUploadingCSV(false);
+        e.target.value = '';
+      },
+      error: (err) => {
+        setUploadingCSV(false);
+        setUploadResult({ added: 0, skipped: 0, errors: ['Failed to parse CSV: ' + (err?.message || 'unknown error')] });
+      },
+    });
   };
 
   const f = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
@@ -71,9 +157,33 @@ export default function Customers() {
           <div className="page-desc">{customers.length} registered customers</div>
         </div>
         <div className="page-header-right">
+          {/* Download CSV */}
+          <button className="btn btn-secondary btn-sm" onClick={downloadCSV} title="Download customers as CSV">
+            <Download size={14} /> Download CSV
+          </button>
+          {/* Upload CSV */}
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }} title="Upload customers from CSV">
+            <Upload size={14} /> {uploadingCSV ? 'Importing…' : 'Upload CSV'}
+            <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleUploadCSV} disabled={uploadingCSV} />
+          </label>
           <button className="btn btn-primary" onClick={openAdd}><Plus size={15} />Add Customer</button>
         </div>
       </div>
+
+      {/* Upload result banner */}
+      {uploadResult && (
+        <div className={`alert ${uploadResult.errors.length > 0 ? 'alert-warning' : 'alert-success'}`} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+            <div>
+              <strong>CSV Import:</strong> {uploadResult.added} added, {uploadResult.skipped} skipped.
+              {uploadResult.errors.length > 0 && (
+                <div style={{ fontSize: 12, marginTop: 4 }}>{uploadResult.errors.slice(0, 3).join(' · ')}</div>
+              )}
+            </div>
+            <button onClick={() => setUploadResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+          </div>
+        </div>
+      )}
 
       {/* Pending approvals banner */}
       {pendingCustomers.length > 0 && isAdmin && (
@@ -129,12 +239,26 @@ export default function Customers() {
                           <CheckCircle size={14} />
                         </button>
                       )}
+                      {isAdmin && (
+                        <button
+                          className="btn btn-ghost btn-sm btn-icon"
+                          title="Delete Customer"
+                          onClick={() => deleteCustomer(c)}
+                          disabled={deletingId === c.id}
+                          style={{ color: 'var(--red)' }}
+                        >
+                          {deletingId === c.id ? '…' : <Trash2 size={14} />}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 10 }}>
+          CSV upload columns: <code>Name</code>, <code>Phone</code>, <code>Email</code>, <code>Ghana Card</code>, <code>Date of Birth</code>, <code>Address</code>, <code>Occupation</code>, <code>Employer</code>, <code>Monthly Income</code>
         </div>
       </div>
 

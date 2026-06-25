@@ -3,10 +3,12 @@ import { useApp } from '../../context/AppContext';
 import { useNavigate } from 'react-router-dom';
 import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
-import { Search, Plus, CheckCircle, XCircle, DollarSign, ShoppingBag, Edit2, Trash2, Download, FileText } from 'lucide-react';
+import { Search, Plus, CheckCircle, XCircle, DollarSign, ShoppingBag, Edit2, Trash2, Download, FileText, Eye } from 'lucide-react';
 import { authDB } from '../../core/db';
 import { supabase } from '../../core/supabase';
 import { exportCSV, exportLoanReportPDF } from '../../core/export';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const GHS = (n) => `GH₵ ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
 const fmtDate = (v) => { if (!v) return '—'; const d = new Date(v); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(); };
@@ -57,6 +59,9 @@ export default function Loans() {
   const [repayModal, setRepayModal] = useState(null);
   const [editModal, setEditModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
+  const [detailModal, setDetailModal] = useState(null);
+  const [detailItems, setDetailItems] = useState([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const [repayAmount, setRepayAmount] = useState('');
   const [editForm, setEditForm] = useState(EMPTY_EDIT);
@@ -254,6 +259,94 @@ export default function Loans() {
     }
   };
 
+  // ── Loan Detail (items breakdown) ───────────────────────────────────────────
+  const openDetail = async (loan) => {
+    setDetailModal(loan);
+    setDetailItems([]);
+    setLoadingDetail(true);
+    const { data } = await supabase
+      .from('hp_loan_items')
+      .select('*, hp_items(name, image, category, price)')
+      .eq('loan_id', loan.id)
+      .order('added_at', { ascending: true });
+    setDetailItems(data || []);
+    setLoadingDetail(false);
+  };
+
+  const printDetailPDF = () => {
+    if (!detailModal) return;
+    const l = detailModal;
+    // jsPDF default fonts don't support GH₵ symbol — use plain ASCII for PDF
+    const GHSC = (n) => `GHS ${Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = 210;
+    // Header
+    doc.setFillColor(26, 86, 219);
+    doc.rect(0, 0, W, 20, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold');
+    doc.text('Majupat Love Enterprise', 14, 13);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text('Generated: ' + new Date().toLocaleString(), W - 14, 13, { align: 'right' });
+    // Title
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text('Hire Purchase Loan — Item Breakdown', 14, 32);
+    // Loan info
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
+    const info = [
+      ['Customer', l.customer?.name || '-'],
+      ['Phone', l.customer?.phone || '-'],
+      ['Account', l.account?.accountNumber || l.accountNumber || '-'],
+      ['Loan ID', '...' + (l.id?.slice(-10) || '')],
+      ['Status', l.status],
+      ['Interest Rate', l.interestRate + '% p.a.'],
+      ['Tenure', l.tenure + ' months'],
+      ['Monthly Payment', GHSC(l.monthlyPayment)],
+      ['Total Repayment', GHSC(l.totalRepay)],
+      ['Outstanding', GHSC(l.outstanding)],
+    ];
+    let y = 40;
+    info.forEach(([k, v], i) => {
+      const x = i % 2 === 0 ? 14 : 110;
+      if (i % 2 === 0 && i > 0) y += 7;
+      doc.setFont('helvetica', 'bold'); doc.text(k + ':', x, y);
+      doc.setFont('helvetica', 'normal'); doc.text(String(v), x + 38, y);
+    });
+    y += 12;
+    // Items table
+    if (detailItems.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [['#', 'Item', 'Category', 'Unit Price', 'Qty', 'Total']],
+        body: detailItems.map((li, i) => [
+          i + 1,
+          li.item_name || li.hp_items?.name || '-',
+          li.hp_items?.category || '-',
+          GHSC(li.unit_price),
+          li.quantity,
+          GHSC(li.total_price ?? (li.unit_price * li.quantity)),
+        ]),
+        styles: { fontSize: 9, cellPadding: 2.5 },
+        headStyles: { fillColor: [26, 86, 219], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: { 0: { cellWidth: 10 }, 3: { halign: 'right' }, 5: { halign: 'right' } },
+      });
+      const fy = doc.lastAutoTable.finalY + 6;
+      const itemsTotal = detailItems.reduce((s, li) => s + Number(li.total_price ?? (li.unit_price * li.quantity)), 0);
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(15, 23, 42);
+      doc.text('Items Total: ' + GHSC(itemsTotal), W - 14, fy, { align: 'right' });
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);
+      doc.text('Interest: ' + GHSC(l.totalInterest > 0 ? l.totalInterest : 0), W - 14, fy + 6, { align: 'right' });
+      doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(26, 86, 219);
+      doc.text('Total Repayment: ' + GHSC(l.totalRepay), W - 14, fy + 14, { align: 'right' });
+    } else {
+      doc.setFontSize(10); doc.setTextColor(150, 150, 150);
+      doc.text('No items assigned to this loan.', 14, y + 10);
+    }
+    doc.save('hp-loan-' + (l.id?.slice(-8) || 'detail') + '.pdf');
+  };
+
   // ── Export ──────────────────────────────────────────────────────────────────
   const handleExportCSV = () => {
     const rows = reportLoans.map(l => ({
@@ -291,7 +384,8 @@ export default function Loans() {
 
   // ── Loan row component ──────────────────────────────────────────────────────
   const LoanRow = ({ l }) => (
-    <tr key={l.id}>
+    <tr key={l.id} style={{ cursor: l.type === 'hire_purchase' ? 'pointer' : 'default' }}
+      onClick={() => { if (l.type === 'hire_purchase') openDetail(l); }}>
       <td>
         <div style={{ fontWeight: 700, fontSize: 13 }}>{l.customer?.name || '—'}</div>
         <div className="font-mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.account?.accountNumber || l.accountNumber || '—'}</div>
@@ -303,6 +397,9 @@ export default function Loans() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
             <ShoppingBag size={10} />{l.itemName}
           </div>
+        )}
+        {l.type === 'hire_purchase' && (
+          <div style={{ fontSize: 10, color: 'var(--brand)', marginTop: 2, fontWeight: 600 }}>Click to view items</div>
         )}
       </td>
       <td className="font-mono" style={{ fontWeight: 700 }}>{GHS(l.principal)}</td>
@@ -329,6 +426,12 @@ export default function Loans() {
       </td>
       <td>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'nowrap' }}>
+          {l.type === 'hire_purchase' && (
+            <button className="btn btn-ghost btn-sm btn-icon" title="View Items" style={{ color: 'var(--brand)' }}
+              onClick={e => { e.stopPropagation(); openDetail(l); }}>
+              <Eye size={13} />
+            </button>
+          )}
           {l.status === 'pending' && (
             <>
               <button className="btn btn-success btn-sm btn-icon" title="Approve" onClick={() => { setError(''); setApproveModal(l); }}>
@@ -860,6 +963,121 @@ export default function Loans() {
               <div className="alert alert-warning">
                 <strong>Cascade Warning:</strong> This loan is linked to a Hire Purchase agreement. Deleting this loan will also delete the associated HP agreement.
               </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* DETAIL MODAL — HP Loan Items Breakdown                                */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        open={!!detailModal}
+        onClose={() => { setDetailModal(null); setDetailItems([]); }}
+        title={`🛍️ HP Loan — Item Breakdown`}
+        size="lg"
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => { setDetailModal(null); setDetailItems([]); }}>Close</button>
+            <button className="btn btn-primary" onClick={printDetailPDF} disabled={loadingDetail}>
+              <FileText size={14} /> Print / Download PDF
+            </button>
+          </>
+        }
+      >
+        {detailModal && (
+          <div>
+            {/* Loan summary */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
+              {[
+                ['Customer',       detailModal.customer?.name || '—',                    'var(--text)'],
+                ['Account',        detailModal.account?.accountNumber || detailModal.accountNumber || '—', 'var(--text)'],
+                ['Status',         detailModal.status,                                   detailModal.status === 'active' ? 'var(--green)' : detailModal.status === 'overdue' ? 'var(--red)' : 'var(--text-3)'],
+                ['Principal',      GHS(detailModal.principal),                           'var(--brand)'],
+                ['Interest Rate',  detailModal.interestRate + '% p.a.',                  'var(--text)'],
+                ['Tenure',         detailModal.tenure + ' months',                       'var(--text)'],
+                ['Monthly Payment',GHS(detailModal.monthlyPayment),                      'var(--green)'],
+                ['Total Repayment',GHS(detailModal.totalRepay),                          'var(--green)'],
+                ['Outstanding',    GHS(detailModal.outstanding),                         Number(detailModal.outstanding) > 0 ? 'var(--red)' : 'var(--green)'],
+              ].map(([k, v, c]) => (
+                <div key={k} style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>{k}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c, textTransform: 'capitalize' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Items table */}
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
+              Items Assigned ({detailItems.length})
+            </div>
+            {loadingDetail ? (
+              <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>Loading items…</div>
+            ) : detailItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 32, background: 'var(--surface-2)', borderRadius: 10, color: 'var(--text-3)' }}>
+                <ShoppingBag size={32} style={{ opacity: .2, display: 'block', margin: '0 auto 8px' }} />
+                <div style={{ fontWeight: 600 }}>No items assigned to this loan</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Go to HP Loan Items to assign items</div>
+              </div>
+            ) : (
+              <>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 36 }}>#</th>
+                        <th>Item</th>
+                        <th>Category</th>
+                        <th style={{ textAlign: 'right' }}>Unit Price</th>
+                        <th style={{ textAlign: 'center' }}>Qty</th>
+                        <th style={{ textAlign: 'right' }}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailItems.map((li, i) => (
+                        <tr key={li.id}>
+                          <td style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'center' }}>{i + 1}</td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 20 }}>{li.item_image || li.hp_items?.image || '📦'}</span>
+                              <span style={{ fontWeight: 600, fontSize: 13 }}>{li.item_name || li.hp_items?.name}</span>
+                            </div>
+                          </td>
+                          <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{li.hp_items?.category || '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{GHS(li.unit_price)}</td>
+                          <td style={{ textAlign: 'center', fontWeight: 700 }}>{li.quantity}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>
+                            {GHS(li.total_price ?? (li.unit_price * li.quantity))}
+                          </td>
+                        </tr>
+                      ))}
+                      {/* Totals */}
+                      {(() => {
+                        const itemsTotal = detailItems.reduce((s, li) => s + Number(li.total_price ?? (li.unit_price * li.quantity)), 0);
+                        return (
+                          <>
+                            <tr style={{ background: 'var(--surface-2)' }}>
+                              <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, paddingRight: 12 }}>Items Total</td>
+                              <td style={{ textAlign: 'right', fontWeight: 800, fontSize: 14, color: 'var(--brand)' }}>{GHS(itemsTotal)}</td>
+                            </tr>
+                            <tr style={{ background: 'var(--surface-2)' }}>
+                              <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, paddingRight: 12, color: '#ea580c' }}>+ Interest</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#ea580c' }}>{GHS(detailModal.totalInterest > 0 ? detailModal.totalInterest : 0)}</td>
+                            </tr>
+                            <tr style={{ background: '#eff6ff' }}>
+                              <td colSpan={5} style={{ textAlign: 'right', fontWeight: 800, fontSize: 14, paddingRight: 12, color: 'var(--brand)' }}>Total Repayment</td>
+                              <td style={{ textAlign: 'right', fontWeight: 900, fontSize: 16, color: 'var(--brand)' }}>{GHS(detailModal.totalRepay)}</td>
+                            </tr>
+                          </>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-3)', textAlign: 'right' }}>
+                  Payment: {GHS(detailModal.monthlyPayment)}/month · {GHS(detailModal.daily?.toFixed ? detailModal.daily : 0)}/day · {GHS(detailModal.weekly?.toFixed ? detailModal.weekly : 0)}/week
+                </div>
+              </>
             )}
           </div>
         )}

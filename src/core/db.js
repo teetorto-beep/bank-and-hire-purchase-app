@@ -912,6 +912,9 @@ export const productsDB = {
       max_balance: payload.maxBalance ?? payload.max_balance,
       monthly_fee: payload.monthlyFee ?? payload.monthly_fee,
       tenure_months: payload.tenureMonths ?? payload.tenure_months,
+      max_customers: payload.max_customers !== undefined ? payload.max_customers
+                   : payload.maxCustomers  !== undefined ? payload.maxCustomers
+                   : undefined,
       benefits: payload.benefits,
       status: payload.status,
     });
