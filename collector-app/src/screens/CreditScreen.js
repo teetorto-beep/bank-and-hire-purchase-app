@@ -88,9 +88,19 @@ export default function CreditScreen({ collector }) {
         // One customer — load all their accounts
         await loadCustomerAccounts(byName[0]);
       } else {
-        // Multiple customers — show customer picker
+        // Multiple customers — fetch their account counts and types too
+        const custIds = byName.map(c => c.id);
+        const { data: allAccts } = await supabase
+          .from("accounts")
+          .select("id,account_number,balance,type,status,customer_id")
+          .in("customer_id", custIds)
+          .eq("status", "active");
+        const custsWithAccts = byName.map(c => ({
+          ...c,
+          _accounts: (allAccts || []).filter(a => a.customer_id === c.id),
+        }));
         setCustomer(null);
-        setCustAccounts(byName.map(c => ({ ...c, _isCustomer: true })));
+        setCustAccounts(custsWithAccts);
         setStep("pick_customer");
       }
     } catch (e) { Alert.alert("Error", e.message || "Search failed"); }
@@ -377,10 +387,11 @@ export default function CreditScreen({ collector }) {
           <Text style={S.headerTitle}>Record Collection</Text>
           <Text style={S.headerSub}>Post cash collection to customer account</Text>
           <View style={S.steps}>
-            {[{n:1,label:"Find"},{n:"pick_account",label:"Account"},{n:2,label:"Post"}].map((s,i) => {
+            {[{n:1,label:"Find"},{n:"pick_account",label:"Account"},{n:"confirm_account",label:"Confirm"},{n:2,label:"Post"}].map((s,i) => {
               const active = step === s.n;
-              const done = (s.n === 1 && (step === "pick_customer" || step === "pick_account" || step === 2))
-                        || (s.n === "pick_account" && step === 2);
+              const done = (s.n === 1 && (step === "pick_customer" || step === "pick_account" || step === "confirm_account" || step === 2))
+                        || (s.n === "pick_account" && (step === "confirm_account" || step === 2))
+                        || (s.n === "confirm_account" && step === 2);
               return (
                 <React.Fragment key={String(s.n)}>
                   <View style={S.stepItem}>
@@ -391,7 +402,7 @@ export default function CreditScreen({ collector }) {
                     </View>
                     <Text style={[S.stepLbl, active && S.stepLblOn, done && {color:C.brand}]}>{s.label}</Text>
                   </View>
-                  {i < 2 && <View style={[S.stepLine, done && {backgroundColor:C.brand}]} />}
+                  {i < 3 && <View style={[S.stepLine, done && {backgroundColor:C.brand}]} />}
                 </React.Fragment>
               );
             })}
@@ -430,20 +441,43 @@ export default function CreditScreen({ collector }) {
         {step === "pick_customer" && (
           <View style={S.card}>
             <Text style={S.cardTitle}>Select Customer</Text>
-            <Text style={S.cardSub}>Multiple customers found — tap to select</Text>
-            {custAccounts.map(c => (
-              <TouchableOpacity key={c.id} style={S.resultRow}
-                onPress={() => loadCustomerAccounts(c)} activeOpacity={0.7}>
-                <View style={S.resultAvatar}>
-                  <Text style={S.resultAvatarTxt}>{(c.name||"A")[0].toUpperCase()}</Text>
-                </View>
-                <View style={{flex:1}}>
-                  <Text style={S.resultName}>{c.name}</Text>
-                  <Text style={S.resultMeta}>{c.phone || "—"}</Text>
-                </View>
-                <Text style={{fontSize:18, color:C.text3}}>›</Text>
-              </TouchableOpacity>
-            ))}
+            <Text style={S.cardSub}>Multiple customers found — tap to view their accounts</Text>
+            {custAccounts.map(c => {
+              const accts = c._accounts || [];
+              return (
+                <TouchableOpacity key={c.id} style={S.resultRow}
+                  onPress={() => loadCustomerAccounts(c)} activeOpacity={0.7}>
+                  <View style={S.resultAvatar}>
+                    <Text style={S.resultAvatarTxt}>{(c.name||"A")[0].toUpperCase()}</Text>
+                  </View>
+                  <View style={{flex:1}}>
+                    <Text style={S.resultName}>{c.name}</Text>
+                    <Text style={S.resultMeta}>📞 {c.phone || "—"}</Text>
+                    {/* Account summary */}
+                    {accts.length > 0 ? (
+                      <View style={{flexDirection:"row", flexWrap:"wrap", gap:4, marginTop:5}}>
+                        {accts.map(a => {
+                          const ti = accTypeInfo(a.type);
+                          return (
+                            <View key={a.id} style={{backgroundColor:ti.bg, paddingHorizontal:7, paddingVertical:3, borderRadius:8}}>
+                              <Text style={{fontSize:10, fontWeight:"700", color:ti.color}}>
+                                {ti.label} · {GHS(a.balance)}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    ) : (
+                      <Text style={{fontSize:11, color:C.text4, marginTop:3}}>No active accounts</Text>
+                    )}
+                  </View>
+                  <View style={{alignItems:"flex-end", gap:4}}>
+                    <Text style={{fontSize:12, fontWeight:"800", color:C.brand}}>{accts.length} acct{accts.length!==1?"s":""}</Text>
+                    <Text style={{fontSize:16, color:C.text3}}>›</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
             <TouchableOpacity style={S.cancelBtn} onPress={reset}>
               <Text style={S.cancelBtnTxt}>← Back to Search</Text>
             </TouchableOpacity>
@@ -471,7 +505,7 @@ export default function CreditScreen({ collector }) {
               const ti = accTypeInfo(a.type);
               return (
                 <TouchableOpacity key={a.id} style={[S.acctPickRow, {borderColor: ti.color + "40"}]}
-                  onPress={() => { setAccount(a); setStep(2); }} activeOpacity={0.75}>
+                  onPress={() => { setAccount(a); setStep("confirm_account"); }} activeOpacity={0.75}>
                   <View style={[S.acctPickBadge, {backgroundColor: ti.bg}]}>
                     <Text style={[S.acctPickBadgeTxt, {color: ti.color}]}>{ti.label}</Text>
                   </View>
@@ -480,8 +514,11 @@ export default function CreditScreen({ collector }) {
                     <Text style={[S.acctPickType, {color: ti.color}]}>{ti.label}</Text>
                   </View>
                   <View style={{alignItems:"flex-end"}}>
-                    <Text style={S.acctPickBal}>{GHS(a.balance)}</Text>
+                    <Text style={[S.acctPickBal, {color: Number(a.balance) < 0 ? "#ef4444" : C.text}]}>{GHS(a.balance)}</Text>
                     <Text style={{fontSize:10, color:C.text4}}>balance</Text>
+                    <View style={{marginTop:4, backgroundColor:ti.bg, paddingHorizontal:6, paddingVertical:2, borderRadius:6}}>
+                      <Text style={{fontSize:10, color:ti.color, fontWeight:"700"}}>SELECT →</Text>
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
@@ -489,6 +526,83 @@ export default function CreditScreen({ collector }) {
 
             <TouchableOpacity style={S.cancelBtn} onPress={reset}>
               <Text style={S.cancelBtnTxt}>← Back to Search</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── STEP confirm_account: confirm before posting ── */}
+        {step === "confirm_account" && account && (
+          <View style={S.card}>
+            {/* Big confirm header */}
+            <View style={{alignItems:"center", paddingVertical:16, marginBottom:16}}>
+              <View style={{width:64, height:64, borderRadius:32, backgroundColor:"#dbeafe", alignItems:"center", justifyContent:"center", marginBottom:10}}>
+                <Text style={{fontSize:30}}>🔍</Text>
+              </View>
+              <Text style={{fontSize:17, fontWeight:"900", color:C.text, marginBottom:4}}>Confirm Account</Text>
+              <Text style={{fontSize:13, color:C.text3, textAlign:"center"}}>Please verify this is the correct account before posting</Text>
+            </View>
+
+            {/* Account details card */}
+            {(() => {
+              const ti = accTypeInfo(account.type);
+              return (
+                <View style={{backgroundColor:ti.bg, borderRadius:14, padding:18, marginBottom:16, borderWidth:2, borderColor:ti.color+"40"}}>
+                  <View style={{flexDirection:"row", alignItems:"center", gap:10, marginBottom:12}}>
+                    <View style={{backgroundColor:ti.color, width:10, height:10, borderRadius:5}}/>
+                    <Text style={{fontSize:12, fontWeight:"700", color:ti.color, textTransform:"uppercase", letterSpacing:1}}>{ti.label}</Text>
+                  </View>
+                  <Text style={{fontSize:22, fontWeight:"900", fontFamily:"monospace", color:C.text, marginBottom:6, letterSpacing:1}}>
+                    {account.account_number}
+                  </Text>
+                  <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"flex-end"}}>
+                    <View>
+                      <Text style={{fontSize:11, color:C.text4, marginBottom:2}}>Customer</Text>
+                      <Text style={{fontSize:15, fontWeight:"700", color:C.text}}>{account.customer?.name || customer?.name || "—"}</Text>
+                      <Text style={{fontSize:12, color:C.text3, marginTop:2}}>{account.customer?.phone || customer?.phone || ""}</Text>
+                    </View>
+                    <View style={{alignItems:"flex-end"}}>
+                      <Text style={{fontSize:11, color:C.text4, marginBottom:2}}>Balance</Text>
+                      <Text style={{fontSize:22, fontWeight:"900", color: Number(account.balance) < 0 ? "#ef4444" : "#16a34a"}}>{GHS(account.balance)}</Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })()}
+
+            {/* Warning if customer has other accounts */}
+            {custAccounts.length > 1 && (
+              <View style={{backgroundColor:"#fffbeb", borderRadius:10, padding:12, marginBottom:16, borderWidth:1, borderColor:"#fcd34d"}}>
+                <Text style={{fontSize:12, fontWeight:"700", color:"#92400e", marginBottom:6}}>⚠ This customer has {custAccounts.length} accounts</Text>
+                {custAccounts.filter(a => a.id !== account.id).map(a => {
+                  const ti = accTypeInfo(a.type);
+                  return (
+                    <View key={a.id} style={{flexDirection:"row", justifyContent:"space-between", paddingVertical:4, borderTopWidth:1, borderTopColor:"#fde68a"}}>
+                      <Text style={{fontSize:11, color:"#92400e", fontWeight:"600"}}>{ti.label} · {a.account_number}</Text>
+                      <Text style={{fontSize:11, color:"#92400e", fontWeight:"700"}}>{GHS(a.balance)}</Text>
+                    </View>
+                  );
+                })}
+                <TouchableOpacity style={{marginTop:8}} onPress={() => setStep("pick_account")}>
+                  <Text style={{fontSize:12, color:"#2563eb", fontWeight:"700"}}>← Choose a different account</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Confirm / Cancel buttons */}
+            <TouchableOpacity
+              style={{backgroundColor:C.brand, borderRadius:12, paddingVertical:16, alignItems:"center", marginBottom:10}}
+              onPress={() => setStep(2)}
+              activeOpacity={0.85}>
+              <Text style={{color:"#fff", fontSize:16, fontWeight:"800"}}>✓ Yes, this is correct</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{backgroundColor:C.bg, borderRadius:12, paddingVertical:14, alignItems:"center", borderWidth:1, borderColor:C.border}}
+              onPress={() => setStep("pick_account")}
+              activeOpacity={0.85}>
+              <Text style={{color:C.text, fontSize:14, fontWeight:"700"}}>← Choose Different Account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={S.cancelBtn} onPress={reset}>
+              <Text style={S.cancelBtnTxt}>✕ Cancel</Text>
             </TouchableOpacity>
           </View>
         )}

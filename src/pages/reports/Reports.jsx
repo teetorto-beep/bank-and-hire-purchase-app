@@ -39,6 +39,9 @@ export default function Reports() {
   const [period, setPeriod] = useState('month');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  // Duplicates tab state
+  const [dupSearch, setDupSearch] = useState('');
+  const [selectedCust, setSelectedCust] = useState(null);
 
   const [from, to] = useMemo(() => {
     if (period === 'custom') return [customFrom ? new Date(customFrom) : null, customTo ? new Date(customTo + 'T23:59:59') : null];
@@ -82,6 +85,7 @@ export default function Reports() {
     { key: 'products', label: 'By Product' },
     { key: 'customers', label: 'Customers' },
     { key: 'audit', label: 'Audit Trail' },
+    { key: 'duplicates', label: '⚠ Duplicates' },
   ];
 
   // ── Export helpers ──────────────────────────────────────────────────────────
@@ -577,6 +581,313 @@ export default function Reports() {
           </div>
         </div>
       )}
+
+      {/* ── Duplicates Report ─────────────────────────────────────────────────── */}
+      {tab === 'duplicates' && (() => {
+        const norm = (s) => (s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+        const q = dupSearch.trim().toLowerCase();
+
+        // 1. All customers with 2+ accounts
+        const allMultiAcct = customers
+          .map(c => ({ customer: c, accounts: accounts.filter(a => (a.customer_id || a.customerId) === c.id) }))
+          .filter(r => r.accounts.length > 1)
+          .sort((a, b) => b.accounts.length - a.accounts.length);
+        const multiAcct = q ? allMultiAcct.filter(r =>
+          norm(r.customer.name).includes(q) || (r.customer.phone||'').includes(q) ||
+          (r.customer.ghana_card||r.customer.ghanaCard||'').toLowerCase().includes(q)
+        ) : allMultiAcct;
+
+        // 2. Exact duplicate names
+        const nameGroups = {};
+        customers.forEach(c => { const k = norm(c.name); if (!nameGroups[k]) nameGroups[k] = []; nameGroups[k].push(c); });
+        const allExactDups = Object.values(nameGroups).filter(g => g.length > 1);
+        const exactDups = q ? allExactDups.filter(g => g.some(c => norm(c.name).includes(q)||(c.phone||'').includes(q))) : allExactDups;
+
+        // 3. Similar names (Levenshtein ≤ 2)
+        const lev = (a, b) => {
+          const dp = Array.from({length:a.length+1},(_,i)=>Array.from({length:b.length+1},(_,j)=>i===0?j:j===0?i:0));
+          for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++)
+            dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+          return dp[a.length][b.length];
+        };
+        const normed = customers.map(c=>({c,n:norm(c.name)}));
+        const allSimilar=[]; const seen=new Set();
+        for(let i=0;i<normed.length;i++) for(let j=i+1;j<normed.length;j++){
+          const k=normed[i].c.id+'_'+normed[j].c.id; if(seen.has(k)) continue;
+          const d=lev(normed[i].n,normed[j].n);
+          if(d>0&&d<=2){seen.add(k);allSimilar.push({a:normed[i].c,b:normed[j].c,distance:d});}
+        }
+        const similarPairs = q ? allSimilar.filter(p=>norm(p.a.name).includes(q)||norm(p.b.name).includes(q)||(p.a.phone||'').includes(q)||(p.b.phone||'').includes(q)) : allSimilar;
+
+        const tb = (type) => ({
+          bg: type==='savings'?'#dcfce7':type==='hire_purchase'?'#ede9fe':type==='current'?'#dbeafe':'#f3f4f6',
+          color: type==='savings'?'#16a34a':type==='hire_purchase'?'#7c3aed':type==='current'?'#2563eb':'#374151',
+        });
+        const exportDups = () => exportCSV(multiAcct.flatMap(r=>r.accounts.map(a=>({'Customer':r.customer.name,'Phone':r.customer.phone,'Ghana Card':r.customer.ghana_card||'','Account':a.account_number||a.accountNumber,'Type':a.type,'Balance':a.balance,'Status':a.status}))),'multi-account-customers');
+        const exportSimilar = () => exportCSV([...exactDups.flatMap(g=>g.map(c=>({Type:'EXACT',Name:c.name,Phone:c.phone}))), ...similarPairs.map(p=>({Type:`SIMILAR(${p.distance})`,NameA:p.a.name,PhoneA:p.a.phone,NameB:p.b.name,PhoneB:p.b.phone}))],'similar-names');
+
+        return (
+          <>
+            {/* Customer detail popup */}
+            {selectedCust && (() => {
+              const custAccts = accounts.filter(a=>(a.customer_id||a.customerId)===selectedCust.id);
+              const custLoans = loans.filter(l=>(l.customer_id||l.customerId)===selectedCust.id&&['active','overdue'].includes(l.status));
+              return (
+                <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={()=>setSelectedCust(null)}>
+                  <div style={{background:'var(--surface)',borderRadius:16,padding:28,maxWidth:580,width:'100%',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}} onClick={e=>e.stopPropagation()}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
+                      <div>
+                        <div style={{fontSize:20,fontWeight:900}}>{selectedCust.name}</div>
+                        <div style={{fontSize:13,color:'var(--text-3)',marginTop:4}}>
+                          📞 {selectedCust.phone}
+                          {(selectedCust.ghana_card||selectedCust.ghanaCard)&&` · 🪪 ${selectedCust.ghana_card||selectedCust.ghanaCard}`}
+                          {selectedCust.email&&` · ✉ ${selectedCust.email}`}
+                        </div>
+                      </div>
+                      <button onClick={()=>setSelectedCust(null)} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'var(--text-3)'}}>✕</button>
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:20}}>
+                      {[{l:'Accounts',v:custAccts.length,c:'#2563eb'},{l:'Total Balance',v:GHS(custAccts.reduce((s,a)=>s+Number(a.balance||0),0)),c:'#16a34a'},{l:'Active Loans',v:custLoans.length,c:'#f59e0b'}].map(s=>(
+                        <div key={s.l} style={{padding:'12px 14px',borderRadius:10,background:'var(--surface-2)',textAlign:'center'}}>
+                          <div style={{fontSize:20,fontWeight:900,color:s.c}}>{s.v}</div>
+                          <div style={{fontSize:11,color:'var(--text-3)',marginTop:2}}>{s.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{fontWeight:700,fontSize:12,marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-3)'}}>Accounts ({custAccts.length})</div>
+                    {custAccts.length===0?<div style={{color:'var(--text-3)',fontSize:13,marginBottom:16}}>No accounts.</div>:(
+                      <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
+                        {custAccts.map((a,idx)=>{const t=tb(a.type);return(
+                          <div key={a.id} style={{padding:'12px 14px',borderRadius:10,border:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                              <span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,background:t.bg,color:t.color,whiteSpace:'nowrap'}}>
+                                {(a.type||'').replace(/_/g,' ')} {custAccts.filter(x=>x.type===a.type).length>1?idx+1:''}
+                              </span>
+                              <div>
+                                <div style={{fontFamily:'monospace',fontWeight:700,fontSize:13}}>{a.account_number||a.accountNumber}</div>
+                                <div style={{fontSize:11,color:'var(--text-3)',textTransform:'capitalize'}}>{a.status} · {a.interest_rate??a.interestRate??0}% p.a.</div>
+                              </div>
+                            </div>
+                            <div style={{fontWeight:800,color:Number(a.balance)<0?'#ef4444':'var(--text)'}}>{GHS(a.balance)}</div>
+                          </div>
+                        );})}
+                      </div>
+                    )}
+                    {custLoans.length>0&&(<>
+                      <div style={{fontWeight:700,fontSize:12,marginBottom:8,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text-3)'}}>Active Loans ({custLoans.length})</div>
+                      {custLoans.map(l=>(
+                        <div key={l.id} style={{padding:'10px 14px',borderRadius:8,background:'#fff7ed',border:'1px solid #fed7aa',display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                          <div><div style={{fontWeight:700,fontSize:13,textTransform:'capitalize'}}>{(l.type||'').replace(/_/g,' ')}</div>{l.item_name&&<div style={{fontSize:11,color:'#c2410c'}}>🛍 {l.item_name}</div>}</div>
+                          <div style={{textAlign:'right'}}><div style={{color:'#ef4444',fontWeight:800}}>{GHS(l.outstanding)}</div><div style={{fontSize:11,color:'var(--text-3)'}}>outstanding</div></div>
+                        </div>
+                      ))}
+                    </>)}
+                    <div style={{marginTop:20,display:'flex',gap:10}}>
+                      <button className="btn btn-primary" style={{flex:1}} onClick={()=>{setSelectedCust(null);navigate(`/customers/${selectedCust.id}`);}}>View Full Profile →</button>
+                      <button className="btn btn-secondary" onClick={()=>setSelectedCust(null)}>Close</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={{display:'flex',flexDirection:'column',gap:20}}>
+              {/* Search */}
+              <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                <div className="search-box" style={{flex:1}}>
+                  <Users size={15}/>
+                  <input className="form-control" placeholder="Search by name, phone or Ghana Card…" value={dupSearch} onChange={e=>setDupSearch(e.target.value)}/>
+                </div>
+                {dupSearch&&<button className="btn btn-ghost btn-sm" onClick={()=>setDupSearch('')}>✕ Clear</button>}
+              </div>
+
+              {/* Summary */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
+                {[{l:'Customers with 2+ Accounts',v:allMultiAcct.length,c:'#f59e0b',bg:'#fffbeb'},{l:'Exact Name Duplicates',v:allExactDups.reduce((s,g)=>s+g.length,0),c:'#ef4444',bg:'#fef2f2'},{l:'Similar Name Pairs',v:allSimilar.length,c:'#8b5cf6',bg:'#f5f3ff'}].map(s=>(
+                  <div key={s.l} style={{padding:16,borderRadius:10,background:s.bg,border:`1px solid ${s.c}30`}}>
+                    <div style={{fontSize:28,fontWeight:900,color:s.c}}>{s.v}</div>
+                    <div style={{fontSize:12,color:'var(--text-3)',marginTop:4}}>{s.l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Multi-account table */}
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">Customers with Multiple Accounts ({multiAcct.length})</div>
+                  <button className="btn btn-secondary btn-sm" onClick={exportDups}><Download size={13}/>CSV</button>
+                </div>
+                <div style={{fontSize:12,color:'var(--text-3)',paddingBottom:10}}>👆 Click any row to see full account details</div>
+                {multiAcct.length===0?<div className="table-empty">No customers found</div>:(
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Customer</th><th>Phone</th><th>Ghana Card</th><th style={{textAlign:'center'}}># Accts</th><th>Account Types</th><th>Total Balance</th></tr></thead>
+                      <tbody>
+                        {multiAcct.map(r=>(
+                          <tr key={r.customer.id} style={{cursor:'pointer'}} onClick={()=>setSelectedCust(r.customer)}
+                            onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+                            onMouseLeave={e=>e.currentTarget.style.background=''}>
+                            <td style={{fontWeight:700}}>{r.customer.name}</td>
+                            <td className="font-mono" style={{fontSize:12}}>{r.customer.phone}</td>
+                            <td className="font-mono" style={{fontSize:12}}>{r.customer.ghana_card||r.customer.ghanaCard||'—'}</td>
+                            <td style={{textAlign:'center'}}><span style={{fontWeight:900,fontSize:18,color:'#f59e0b',background:'#fffbeb',padding:'2px 10px',borderRadius:20}}>{r.accounts.length}</span></td>
+                            <td><div style={{display:'flex',flexWrap:'wrap',gap:4}}>{r.accounts.map(a=>{const t=tb(a.type);return(<span key={a.id} style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:20,background:t.bg,color:t.color}}>{(a.type||'').replace(/_/g,' ')}</span>);})}</div></td>
+                            <td style={{fontWeight:700}}>{GHS(r.accounts.reduce((s,a)=>s+Number(a.balance||0),0))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Exact duplicates */}
+              {/* Exact duplicates — same name, different details */}
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title" style={{color:'#ef4444'}}>
+                    ⚠ Same Name, Different Details
+                    {exactDups.length > 0 && <span style={{marginLeft:8,fontSize:13,fontWeight:400,color:'var(--text-3)'}}>({exactDups.length} groups, {allExactDups.reduce((s,g)=>s+g.length,0)} records)</span>}
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn btn-secondary btn-sm" onClick={exportSimilar}><Download size={13}/>CSV</button>
+                  </div>
+                </div>
+
+                {/* Dedicated search for same-name customers */}
+                <div style={{marginBottom:14}}>
+                  <div className="search-box">
+                    <Users size={14}/>
+                    <input className="form-control" placeholder="Search by exact name to find duplicates…"
+                      value={dupSearch} onChange={e=>setDupSearch(e.target.value)}/>
+                  </div>
+                  {dupSearch && (
+                    <div style={{fontSize:12,color:'var(--text-3)',marginTop:6}}>
+                      Showing results for: <strong>"{dupSearch}"</strong> — {exactDups.length} group(s) found
+                    </div>
+                  )}
+                </div>
+
+                {exactDups.length===0 ? (
+                  <div style={{padding:'20px 0',textAlign:'center',color:'var(--text-3)'}}>
+                    {dupSearch ? `No same-name customers found for "${dupSearch}"` : 'No exact duplicate names found ✅'}
+                  </div>
+                ) : (
+                  <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                    {exactDups.map((group, gi) => {
+                      // Find what's different across the group
+                      const phones = [...new Set(group.map(c=>c.phone))];
+                      const cards = [...new Set(group.map(c=>c.ghana_card||c.ghanaCard||'').filter(Boolean))];
+                      const emails = [...new Set(group.map(c=>c.email||'').filter(Boolean))];
+                      const allPhoneSame = phones.length === 1;
+                      const allCardSame = cards.length <= 1;
+                      return (
+                        <div key={gi} style={{border:'2px solid #fca5a5',borderRadius:12,overflow:'hidden'}}>
+                          {/* Group header */}
+                          <div style={{background:'#fef2f2',padding:'10px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',borderBottom:'1px solid #fca5a5'}}>
+                            <div>
+                              <span style={{fontWeight:900,fontSize:15,color:'#dc2626'}}>{group[0].name}</span>
+                              <span style={{marginLeft:10,fontSize:11,background:'#dc2626',color:'#fff',padding:'2px 8px',borderRadius:20,fontWeight:700}}>{group.length} records</span>
+                            </div>
+                            <div style={{display:'flex',gap:6,fontSize:11}}>
+                              {!allPhoneSame && <span style={{background:'#fff7ed',color:'#c2410c',padding:'2px 8px',borderRadius:20,fontWeight:700,border:'1px solid #fed7aa'}}>📞 Different phones</span>}
+                              {!allCardSame && <span style={{background:'#fefce8',color:'#a16207',padding:'2px 8px',borderRadius:20,fontWeight:700,border:'1px solid #fde68a'}}>🪪 Different Ghana Cards</span>}
+                              {emails.length > 1 && <span style={{background:'#f0fdf4',color:'#15803d',padding:'2px 8px',borderRadius:20,fontWeight:700,border:'1px solid #bbf7d0'}}>✉ Different emails</span>}
+                              {allPhoneSame && allCardSame && <span style={{background:'#dcfce7',color:'#16a34a',padding:'2px 8px',borderRadius:20,fontWeight:700}}>⚠ Identical details</span>}
+                            </div>
+                          </div>
+                          {/* Records */}
+                          <table style={{width:'100%',borderCollapse:'collapse'}}>
+                            <thead>
+                              <tr style={{background:'#fff5f5',fontSize:11,color:'var(--text-3)',textTransform:'uppercase'}}>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>#</th>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>Phone</th>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>Ghana Card</th>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>Email</th>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>KYC</th>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>Accounts</th>
+                                <th style={{padding:'8px 12px',textAlign:'left',fontWeight:700}}>Joined</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.map((c, ci) => {
+                                const cAccts = accounts.filter(a=>(a.customer_id||a.customerId)===c.id);
+                                const phoneDiff = !allPhoneSame;
+                                const cardDiff = cards.length > 1 && (c.ghana_card||c.ghanaCard);
+                                return (
+                                  <tr key={c.id} style={{cursor:'pointer',borderTop:'1px solid #fee2e2'}}
+                                    onClick={()=>setSelectedCust(c)}
+                                    onMouseEnter={e=>e.currentTarget.style.background='#fff5f5'}
+                                    onMouseLeave={e=>e.currentTarget.style.background=''}>
+                                    <td style={{padding:'10px 12px',fontWeight:700,color:'#dc2626'}}>{ci+1}</td>
+                                    <td style={{padding:'10px 12px',fontFamily:'monospace',fontSize:12,
+                                      color: phoneDiff ? '#dc2626' : 'var(--text)',
+                                      fontWeight: phoneDiff ? 700 : 400,
+                                    }}>
+                                      {c.phone}
+                                      {phoneDiff && <span style={{marginLeft:4,fontSize:10,color:'#dc2626'}}>⚠</span>}
+                                    </td>
+                                    <td style={{padding:'10px 12px',fontFamily:'monospace',fontSize:12,
+                                      color: cardDiff ? '#a16207' : 'var(--text-3)',
+                                      fontWeight: cardDiff ? 700 : 400,
+                                    }}>
+                                      {c.ghana_card||c.ghanaCard||'—'}
+                                      {cardDiff && <span style={{marginLeft:4,fontSize:10,color:'#a16207'}}>⚠</span>}
+                                    </td>
+                                    <td style={{padding:'10px 12px',fontSize:12,color:'var(--text-3)'}}>{c.email||'—'}</td>
+                                    <td style={{padding:'10px 12px',fontSize:12,textTransform:'capitalize'}}>{c.kyc_status||c.kycStatus}</td>
+                                    <td style={{padding:'10px 12px'}}>
+                                      <span style={{fontSize:12,fontWeight:700,color:'#2563eb'}}>{cAccts.length} account{cAccts.length!==1?'s':''}</span>
+                                    </td>
+                                    <td style={{padding:'10px 12px',fontSize:12,color:'var(--text-3)',whiteSpace:'nowrap'}}>
+                                      {new Date(c.created_at||c.createdAt).toLocaleDateString()}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Similar names */}
+              {similarPairs.length>0&&(
+                <div className="card">
+                  <div className="card-header"><div className="card-title" style={{color:'#8b5cf6'}}>⚠ Similar Names — Possible Duplicates ({similarPairs.length} pairs)</div></div>
+                  <div style={{fontSize:12,color:'var(--text-3)',paddingBottom:10}}>👆 Click a name to see account details</div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Name A</th><th>Phone A</th><th>Name B</th><th>Phone B</th><th>Diff</th></tr></thead>
+                      <tbody>
+                        {similarPairs.map((p,i)=>(
+                          <tr key={i}>
+                            <td style={{fontWeight:700,cursor:'pointer',color:'var(--brand)'}} onClick={()=>setSelectedCust(p.a)}>{p.a.name}</td>
+                            <td className="font-mono" style={{fontSize:12}}>{p.a.phone}</td>
+                            <td style={{fontWeight:700,cursor:'pointer',color:'var(--brand)'}} onClick={()=>setSelectedCust(p.b)}>{p.b.name}</td>
+                            <td className="font-mono" style={{fontSize:12}}>{p.b.phone}</td>
+                            <td><span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:20,background:p.distance===1?'#fef2f2':'#f5f3ff',color:p.distance===1?'#ef4444':'#8b5cf6'}}>{p.distance} char</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {multiAcct.length===0&&exactDups.length===0&&similarPairs.length===0&&(
+                <div className="card"><div style={{padding:32,textAlign:'center',color:'var(--text-3)'}}>
+                  <div style={{fontSize:32,marginBottom:8}}>✅</div>
+                  <div style={{fontWeight:700}}>No duplicates found{q?` for "${dupSearch}"`:''}.</div>
+                </div></div>
+              )}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
